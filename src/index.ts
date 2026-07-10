@@ -24,8 +24,11 @@ async function bootstrap() {
       console.log(`\n🚀 ========================================================`);
       console.log(`🚀 Server listening on port ${port}`);
       console.log(`🚀 Mode: ${config.MOCK_ALL ? 'DEVELOPER MOCK MODE (Zero-Config)' : 'PRODUCTION'}`);
+      const webhookUrl = config.PUBLIC_URL 
+        ? `${config.PUBLIC_URL.replace(/\/$/, '')}/webhook/whatsapp`
+        : `http://localhost:${port}/webhook/whatsapp`;
       console.log(`🚀 Web Dashboard URL: http://localhost:${port}`);
-      console.log(`🚀 Meta Webhook URL:  http://[your-domain]/webhook/whatsapp`);
+      console.log(`🚀 Meta Webhook URL:  ${webhookUrl}`);
       console.log(`🚀 ========================================================\n`);
     });
   } catch (error) {

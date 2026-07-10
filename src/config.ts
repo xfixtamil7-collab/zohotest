@@ -21,6 +21,7 @@ const configSchema = z.object({
   WHATSAPP_TOKEN: z.string().default('mock-whatsapp-token'),
   WHATSAPP_PHONE_NUMBER_ID: z.string().default('mock-phone-id'),
   WHATSAPP_VERIFY_TOKEN: z.string().default('mock-verify-token'),
+  PUBLIC_URL: z.string().optional(),
 });
 
 // Run validation
