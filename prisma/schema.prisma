@@ -1,0 +1,43 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Session model tracks active conversational states and order drafts by phone number
+model Session {
+  phone       String   @id
+  state       String   // e.g. "AWAITING_CONFIRMATION", "AWAITING_INVOICE_DECISION", "IDLE"
+  draftJson   String   // JSON payload of the extracted order information (customer, items, totals, warnings)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// OrderLog stores completed Sales Orders and Invoices synced to Zoho
+model OrderLog {
+  id                 String   @id @default(uuid())
+  phone              String
+  customerName       String
+  zohoCustomerId     String
+  salesOrderId       String   // Zoho Sales Order ID
+  salesOrderNumber   String   // Zoho SO Number (e.g. SO-00001)
+  salesOrderPdf      String?  // Zoho Sales Order PDF URL
+  invoiceId          String?  // Zoho Invoice ID (null if not converted yet)
+  invoiceNumber      String?  // Zoho Invoice Number (e.g. INV-00001)
+  invoicePdf         String?  // Zoho Invoice PDF URL
+  status             String   // e.g. "SALES_ORDER_CREATED", "INVOICED", "CANCELLED"
+  totalAmount        Float
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+// CustomerMapping caches mapped customer links between WhatsApp spoken names and Zoho Contacts
+model CustomerMapping {
+  spokenName       String   @id // e.g. "Murugan Stores"
+  zohoCustomerId   String
+  zohoCustomerName String
+  createdAt        DateTime @default(now())
+}

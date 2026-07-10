@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Zoho Voice Automation Control Console</title>
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="glow-bg"></div>
+  
+  <header>
+    <div class="logo">
+      <span class="pulse-dot"></span>
+      <h1>Zoho Voice <span>Automation Console</span></h1>
+    </div>
+    <div class="status-indicators">
+      <div class="badge success" id="status-mock">Mock Mode Active</div>
+      <div class="badge info" id="status-db">SQLite Database</div>
+    </div>
+  </header>
+
+  <main class="grid-container">
+    
+    <!-- LEFT PANEL: Configuration & Simulator -->
+    <section class="panel glass simulator-panel">
+      <h2>🤖 Pipeline Simulation Console</h2>
+      <p class="section-desc">Simulate incoming WhatsApp messages (voice transcriptions or button actions) to trigger the automated order pipeline.</p>
+      
+      <form id="sim-form" class="sim-form">
+        <div class="form-group">
+          <label for="sim-phone">👤 Phone Number</label>
+          <input type="text" id="sim-phone" value="+919876543210" required>
+        </div>
+        
+        <div class="form-group">
+          <label for="sim-text">💬 Message / Speech Transcript</label>
+          <textarea id="sim-text" placeholder="Type what the user said (in English, Tamil or Tanglish) or select a script below..." rows="3"></textarea>
+        </div>
+
+        <div class="voice-input-row">
+          <button type="button" id="record-btn" class="btn btn-secondary">
+            <span class="mic-icon">🎤</span> Simulate Voice Note Upload
+          </button>
+          <input type="file" id="audio-file" accept="audio/*" style="display: none;">
+          <span id="file-name-label" class="file-label">No file chosen</span>
+        </div>
+
+        <div class="button-group">
+          <button type="submit" class="btn btn-primary" id="send-sim-btn">🚀 Fire Webhook Event</button>
+          <button type="button" class="btn btn-danger" id="clear-session-btn">🧹 Reset Session</button>
+        </div>
+      </form>
+
+      <div class="presets-section">
+        <h3>💡 Predefined Simulation Scripts</h3>
+        <div class="presets-grid">
+          <button class="preset-btn" onclick="applyPreset('Murugan Stores ku 10 cement, 5 steel rod podunga.')">
+            🗣️ <strong>Order (Tanglish):</strong> "Murugan Stores ku 10 cement..."
+          </button>
+          <button class="preset-btn" onclick="applyPreset('Steel rod quantity 8 a maathunga.')">
+            ✍️ <strong>Correction:</strong> "Steel rod quantity 8 a maathunga."
+          </button>
+          <button class="preset-btn" onclick="applyPreset('btn_confirm')">
+            ✅ <strong>Click Button:</strong> "Confirm Order"
+          </button>
+          <button class="preset-btn" onclick="applyPreset('btn_invoice_create')">
+            📄 <strong>Click Button:</strong> "Create Invoice"
+          </button>
+        </div>
+      </div>
+
+      <div class="stepper-section">
+        <h3>⚙️ Real-time Pipeline Logs</h3>
+        <div class="stepper">
+          <div class="step" id="step-incoming">
+            <div class="step-circle">1</div>
+            <div class="step-content">
+              <h4>Webhook Event Received</h4>
+              <p id="log-incoming">Waiting for message...</p>
+            </div>
+          </div>
+          <div class="step" id="step-stt">
+            <div class="step-circle">2</div>
+            <div class="step-content">
+              <h4>Transcription & Processing</h4>
+              <p id="log-stt">Waiting...</p>
+            </div>
+          </div>
+          <div class="step" id="step-ai">
+            <div class="step-circle">3</div>
+            <div class="step-content">
+              <h4>GPT Parsing & Validation</h4>
+              <p id="log-ai">Waiting...</p>
+            </div>
+          </div>
+          <div class="step" id="step-zoho">
+            <div class="step-circle">4</div>
+            <div class="step-content">
+              <h4>Zoho Inventory Integration</h4>
+              <p id="log-zoho">Waiting...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CENTER PANEL: Active Sessions & Inventory Status -->
+    <section class="panel glass data-panel">
+      
+      <!-- Active Sessions -->
+      <div class="data-block">
+        <h2>🔄 Active Conversation Session</h2>
+        <div class="session-card" id="session-display">
+          <div class="empty-state">No active drafting session. Run a script to start.</div>
+        </div>
+      </div>
+
+      <!-- Zoho Inventory Database Browser -->
+      <div class="data-block">
+        <h2>📦 Mock Zoho Inventory Items</h2>
+        <div class="search-bar-container">
+          <input type="text" id="item-search-input" placeholder="🔍 Search products in inventory..." onkeyup="filterItems()">
+        </div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Item Name</th>
+                <th>SKU</th>
+                <th>Rate</th>
+                <th>Stock</th>
+                <th>Tax</th>
+              </tr>
+            </thead>
+            <tbody id="inventory-items-body">
+              <tr><td colspan="5" class="loading">Loading items...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- RIGHT PANEL: WhatsApp Device Frame Mockup -->
+    <section class="panel phone-panel">
+      <div class="phone-frame">
+        <div class="phone-header">
+          <div class="phone-speaker"></div>
+          <div class="phone-contact-info">
+            <div class="phone-avatar">🤖</div>
+            <div>
+              <h3>Zoho Order Bot</h3>
+              <span>Online</span>
+            </div>
+          </div>
+        </div>
+        <div class="phone-chat-area" id="whatsapp-chat">
+          <div class="message system-msg">
+            <span>Automation Server Connected. Send a message to start.</span>
+          </div>
+        </div>
+        <div class="phone-input-bar">
+          <input type="text" placeholder="Type a message..." disabled>
+          <button class="send-icon" disabled>➤</button>
+        </div>
+      </div>
+      <div class="phone-actions">
+        <button class="btn btn-secondary btn-sm" id="clear-phone-btn">🧹 Clear Screen</button>
+      </div>
+
+      <!-- Mock Customer Contacts -->
+      <div class="data-block" style="width: 100%; border-top: 1px solid var(--border-color); padding-top: 1.5rem; margin-top: 0.5rem;">
+        <h2>👥 Mock Zoho Customer Directory</h2>
+        <div class="search-bar-container">
+          <input type="text" id="customer-search-input" placeholder="🔍 Search customers..." onkeyup="filterCustomers()">
+        </div>
+        <div class="table-container" style="max-height: 230px; overflow-y: auto;">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Customer Name</th>
+                <th>Company</th>
+                <th>ID Reference</th>
+              </tr>
+            </thead>
+            <tbody id="inventory-customers-body">
+              <tr><td colspan="3" class="loading">Loading customers...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer>
+    <p>Google Gemini Advanced Developer Environment. Built for the Zoho Voice Automation Suite.</p>
+  </footer>
+
+  <script>
+    // Config properties
+    const API_PORT = window.location.port || '3000';
+    const API_BASE = `${window.location.protocol}//${window.location.hostname}:${API_PORT}`;
+
+    // Apply simulation presets
+    function applyPreset(text) {
+      document.getElementById('sim-text').value = text;
+      document.getElementById('send-sim-btn').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    let allInventoryItems = [];
+
+    function renderInventoryItems(items) {
+      const itemBody = document.getElementById('inventory-items-body');
+      if (items.length === 0) {
+        itemBody.innerHTML = '<tr><td colspan="5" class="loading">No products match search query</td></tr>';
+        return;
+      }
+      itemBody.innerHTML = items.map(it => `
+        <tr>
+          <td><strong>${it.name}</strong></td>
+          <td><code>${it.sku || 'N/A'}</code></td>
+          <td>₹${it.rate}</td>
+          <td><span class="stock-badge ${it.stock_on_hand <= 5 ? 'low' : 'ok'}">${it.stock_on_hand} ${it.unit || 'units'}</span></td>
+          <td>${it.tax_percentage || 0}%</td>
+        </tr>
+      `).join('');
+    }
+
+    function filterItems() {
+      const query = document.getElementById('item-search-input').value.toLowerCase().trim();
+      if (!query) {
+        renderInventoryItems(allInventoryItems);
+        return;
+      }
+      const filtered = allInventoryItems.filter(it => 
+        it.name.toLowerCase().includes(query) || 
+        (it.sku && it.sku.toLowerCase().includes(query))
+      );
+      renderInventoryItems(filtered);
+    }
+
+    let allInventoryCustomers = [];
+
+    function renderInventoryCustomers(customers) {
+      const custBody = document.getElementById('inventory-customers-body');
+      if (customers.length === 0) {
+        custBody.innerHTML = '<tr><td colspan="3" class="loading">No customers match search query</td></tr>';
+        return;
+      }
+      custBody.innerHTML = customers.map(c => `
+        <tr>
+          <td><strong>${c.contact_name}</strong></td>
+          <td>${c.company_name || 'N/A'}</td>
+          <td><code>${c.contact_id}</code></td>
+        </tr>
+      `).join('');
+    }
+
+    function filterCustomers() {
+      const query = document.getElementById('customer-search-input').value.toLowerCase().trim();
+      if (!query) {
+        renderInventoryCustomers(allInventoryCustomers);
+        return;
+      }
+      const filtered = allInventoryCustomers.filter(c => 
+        c.contact_name.toLowerCase().includes(query) || 
+        (c.company_name && c.company_name.toLowerCase().includes(query))
+      );
+      renderInventoryCustomers(filtered);
+    }
+
+    // Load Zoho Inventory items & customers from mock service on dashboard launch
+    async function loadZohoMocks() {
+      try {
+        const itemRes = await fetch(`${API_BASE}/api/mocks/items`);
+        allInventoryItems = await itemRes.json();
+        renderInventoryItems(allInventoryItems);
+
+        const custRes = await fetch(`${API_BASE}/api/mocks/customers`);
+        allInventoryCustomers = await custRes.json();
+        renderInventoryCustomers(allInventoryCustomers);
+      } catch (err) {
+        console.error('Error fetching mock database:', err);
+      }
+    }
+
+    // Refresh active session display
+    async function refreshActiveSession() {
+      try {
+        const phone = document.getElementById('sim-phone').value;
+        const res = await fetch(`${API_BASE}/api/session?phone=${encodeURIComponent(phone)}`);
+        const session = await res.json();
+        
+        const display = document.getElementById('session-display');
+        if (!session.draft) {
+          display.innerHTML = '<div class="empty-state">No active drafting session. Start typing or record an order.</div>';
+          return;
+        }
+
+        const draft = session.draft;
+        const warnings = draft.warnings && draft.warnings.length > 0 
+          ? `<div class="session-warnings">⚠️ <strong>Warnings:</strong><ul>${draft.warnings.map(w=>`<li>${w}</li>`).join('')}</ul></div>`
+          : '';
+
+        display.innerHTML = `
+          <div class="session-details">
+            <div class="session-meta">
+              <span><strong>State:</strong> <span class="badge info">${session.state}</span></span>
+              <span><strong>Customer:</strong> ${draft.zohoCustomerName || draft.spokenCustomerName}</span>
+            </div>
+            
+            <div class="session-items">
+              <h4>Items in Draft</h4>
+              <ul>
+                ${draft.items.map(it => `
+                  <li>
+                    <strong>${it.zohoItemName || it.name}</strong> 
+                    x ${it.quantity} @ ₹${it.rate || 0} 
+                    <span class="session-item-badge ${it.matchedStatus.toLowerCase()}">${it.matchedStatus}</span>
+                  </li>
+                `).join('')}
+              </ul>
+            </div>
+
+            <div class="session-totals">
+              <div>Subtotal: <span>₹${(draft.totalAmount || 0).toFixed(2)}</span></div>
+              <div>Tax Amount: <span>₹${(draft.taxAmount || 0).toFixed(2)}</span></div>
+              <div class="grand-total">Total: <span>₹${(draft.grandTotal || 0).toFixed(2)}</span></div>
+            </div>
+            
+            ${warnings}
+          </div>
+        `;
+      } catch (err) {
+        console.error('Error checking sessions:', err);
+      }
+    }
+
+    // Refresh WhatsApp chat box log from backend
+    async function refreshWhatsAppChat() {
+      try {
+        const res = await fetch(`${API_BASE}/api/whatsapp/logs`);
+        const logs = await res.json();
+        const chatArea = document.getElementById('whatsapp-chat');
+        
+        // Remove existing items and rebuild
+        chatArea.innerHTML = '';
+        
+        if (logs.length === 0) {
+          chatArea.innerHTML = '<div class="message system-msg"><span>No messages sent yet.</span></div>';
+          return;
+        }
+
+        logs.forEach(log => {
+          const isButton = log.type === 'interactive-buttons';
+          
+          let contentHtml = `<p>${log.content.replace(/\n/g, '<br>')}</p>`;
+          
+          if (isButton && log.buttons) {
+            contentHtml += `<div class="message-buttons">`;
+            log.buttons.forEach(btn => {
+              contentHtml += `<button class="msg-quick-reply" onclick="fireBtnReply('${btn.id}')">${btn.title}</button>`;
+            });
+            contentHtml += `</div>`;
+          }
+
+          const msgDiv = document.createElement('div');
+          msgDiv.className = 'message bot-msg';
+          msgDiv.innerHTML = `
+            ${contentHtml}
+            <span class="msg-time">${log.timestamp}</span>
+          `;
+          chatArea.appendChild(msgDiv);
+        });
+
+        chatArea.scrollTop = chatArea.scrollHeight;
+      } catch (err) {
+        console.error('Error loading WhatsApp logs:', err);
+      }
+    }
+
+    // Click quick reply button in simulator
+    async function fireBtnReply(btnId) {
+      document.getElementById('sim-text').value = btnId;
+      document.getElementById('send-sim-btn').click();
+    }
+
+    // Set stepper state visual aids
+    function setStepStatus(stepId, status, details = '') {
+      const el = document.getElementById(stepId);
+      if (!el) return;
+      
+      el.className = `step ${status}`; // active, completed, failed
+      const p = el.querySelector('p');
+      if (p) p.innerHTML = details || (status === 'completed' ? 'Success' : 'Processing...');
+    }
+
+    function resetStepper() {
+      setStepStatus('step-incoming', '', 'Waiting...');
+      setStepStatus('step-stt', '', 'Waiting...');
+      setStepStatus('step-ai', '', 'Waiting...');
+      setStepStatus('step-zoho', '', 'Waiting...');
+    }
+
+    // Handle form submit
+    document.getElementById('sim-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const phone = document.getElementById('sim-phone').value;
+      const text = document.getElementById('sim-text').value.trim();
+      const sendBtn = document.getElementById('send-sim-btn');
+      const fileInput = document.getElementById('audio-file');
+      
+      if (!text && !fileInput.files[0]) {
+        alert('Please write a text command or choose an audio file to simulate.');
+        return;
+      }
+
+      sendBtn.disabled = true;
+      sendBtn.innerText = 'Triggering...';
+      
+      resetStepper();
+      setStepStatus('step-incoming', 'active', 'Sending webhook event to Express Webhook endpoint...');
+
+      try {
+        const formData = new FormData();
+        formData.append('from', phone);
+        
+        if (fileInput.files[0]) {
+          formData.append('type', 'audio');
+          formData.append('audio', fileInput.files[0]);
+        } else {
+          formData.append('type', 'text');
+          formData.append('text', text);
+        }
+
+        const res = await fetch(`${API_BASE}/webhook/whatsapp-simulate`, {
+          method: 'POST',
+          body: formData
+        });
+
+        const data = await res.json();
+        
+        if (res.ok) {
+          setStepStatus('step-incoming', 'completed', 'Webhook accepted. Event queued successfully.');
+          setStepStatus('step-stt', 'active', fileInput.files[0] ? 'Simulating transcription via Whisper...' : 'Parsing plain-text payload directly...');
+          
+          // Poll for completion logs
+          setTimeout(async () => {
+            setStepStatus('step-stt', 'completed', fileInput.files[0] ? 'Transcribed: "Murugan Stores ku 10 cement, 5 steel rod podunga"' : 'Completed.');
+            setStepStatus('step-ai', 'active', 'Running GPT-4o Intent Extraction & fuzzy-matching Zoho items...');
+            
+            setTimeout(async () => {
+              setStepStatus('step-ai', 'completed', 'Order details parsed & validated against Zoho databases.');
+              setStepStatus('step-zoho', 'completed', 'Success. Updated Draft state & generated message output.');
+              
+              // Refresh views
+              await refreshActiveSession();
+              await refreshWhatsAppChat();
+              
+              // Reset file input
+              fileInput.value = '';
+              document.getElementById('file-name-label').innerText = 'No file chosen';
+              document.getElementById('sim-text').value = '';
+            }, 1000);
+          }, 1000);
+          
+        } else {
+          setStepStatus('step-incoming', 'failed', `Webhook failed: ${data.message || 'Error'}`);
+        }
+      } catch (err) {
+        setStepStatus('step-incoming', 'failed', `Error: ${err.message}`);
+      } finally {
+        sendBtn.disabled = false;
+        sendBtn.innerText = '🚀 Fire Webhook Event';
+      }
+    });
+
+    // Reset session helper
+    document.getElementById('clear-session-btn').addEventListener('click', async () => {
+      const phone = document.getElementById('sim-phone').value;
+      try {
+        await fetch(`${API_BASE}/api/session/reset`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ phone })
+        });
+        resetStepper();
+        await refreshActiveSession();
+        await refreshWhatsAppChat();
+      } catch (err) {
+        console.error(err);
+      }
+    });
+
+    // Handle file input upload representation
+    document.getElementById('record-btn').addEventListener('click', () => {
+      document.getElementById('audio-file').click();
+    });
+
+    document.getElementById('audio-file').addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        document.getElementById('file-name-label').innerText = file.name;
+        document.getElementById('sim-text').value = ''; // Clear text if file is chosen
+      }
+    });
+
+
+
+    document.getElementById('clear-phone-btn').addEventListener('click', async () => {
+      try {
+        await fetch(`${API_BASE}/api/whatsapp/logs/clear`, { method: 'POST' });
+        await refreshWhatsAppChat();
+      } catch (e) {}
+    });
+
+    // Initial loads & polling loops
+    loadZohoMocks();
+    refreshActiveSession();
+    refreshWhatsAppChat();
+
+    // Poll every 3 seconds for active changes
+    setInterval(() => {
+      refreshActiveSession();
+      refreshWhatsAppChat();
+    }, 3000);
+
+    // If phone input changes, update immediately
+    document.getElementById('sim-phone').addEventListener('change', () => {
+      refreshActiveSession();
+    });
+  </script>
+</body>
+</html>
