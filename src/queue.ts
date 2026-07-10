@@ -39,10 +39,10 @@ export class QueueService {
         this.redisConnected = true;
         console.log('[QueueService] Redis connected successfully. Initializing BullMQ.');
         
-        this.queue = new Queue('whatsapp-webhook', { connection });
+        this.queue = new Queue('whatsapp-webhook', { connection: connection as any });
         this.worker = new Worker('whatsapp-webhook', async (job) => {
           await this.processMessage(job.data);
-        }, { connection });
+        }, { connection: connection as any });
 
         this.worker.on('failed', (job, err) => {
           console.error(`[QueueService] Job ${job?.id} failed:`, err);
