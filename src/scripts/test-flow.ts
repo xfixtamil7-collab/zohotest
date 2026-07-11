@@ -286,6 +286,34 @@ async function runTestFlow() {
     console.log(`[Tamil-C] Session state after "சரி": ${session.state}`);
     console.log('\n🎉 TAMIL SCRIPT TEST CASES COMPLETED!');
 
+    // === BONUS 2: Deep Phonetic Tanglish Matcher Tests ===
+    console.log('\n\n🌟 [BONUS 2] Running Phonetic Tanglish Matcher Tests...');
+    const { MatcherService } = require('../services/matcher');
+    
+    const testItems = [
+      { name: 'Maaza Juice' },
+      { name: 'Cement Standard Grade' },
+      { name: 'Steel Rod 12mm' },
+      { name: 'Veera Ponni Rice' }
+    ];
+
+    // Test cases: [spoken word, expected match name]
+    const phoneticCases = [
+      ['maasa', 'Maaza Juice'],
+      ['cemend', 'Cement Standard Grade'],
+      ['steel rot', 'Steel Rod 12mm'],
+      ['wira ponni', 'Veera Ponni Rice']
+    ];
+
+    for (const [spoken, expected] of phoneticCases) {
+      const match = MatcherService.match(spoken, testItems, (item: any) => item.name);
+      console.log(`Spoken: "${spoken}" | Match: "${match?.item?.name}" | Status: ${match?.status} | Score: ${match?.score}`);
+      if (!match || match.status === 'NOT_FOUND' || match.item.name !== expected) {
+        throw new Error(`Phonetic match failed! Spoken "${spoken}" expected to match "${expected}", but got "${match?.item?.name}"`);
+      }
+    }
+    console.log('🎉 DEEP PHONETIC MATCHING TESTS PASSED!');
+
   } catch (error) {
     console.error('\n❌ Integration Test Failed:', error);
     process.exit(1);

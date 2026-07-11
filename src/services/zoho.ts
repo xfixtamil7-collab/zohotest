@@ -31,7 +31,10 @@ export class ZohoService {
     { item_id: 'i_brick_103', name: 'Clay Brick Red', sku: 'BRK-RED', rate: 9, stock_on_hand: 5000, tax_percentage: 5, unit: 'Pcs' },
     { item_id: 'i_paint_104', name: 'Asian Paints White 20L', sku: 'PNT-AP-20L', rate: 3200, stock_on_hand: 15, tax_percentage: 18, unit: 'Buckets' },
     { item_id: 'i_rice_105', name: 'Rice Bag 25Kg', sku: 'RICE-25KG', rate: 35, stock_on_hand: 2000, tax_percentage: 0, unit: '25Kg Bags' },
-    { item_id: 'i_veeraponni_106', name: 'Veera Ponni Rice 20Kg', sku: 'RICE-VP-20KG', rate: 37.9, stock_on_hand: 3000, tax_percentage: 0, unit: '20Kg Bags' }
+    { item_id: 'i_veeraponni_106', name: 'Veera Ponni Rice 20Kg', sku: 'RICE-VP-20KG', rate: 37.9, stock_on_hand: 3000, tax_percentage: 0, unit: '20Kg Bags' },
+    { item_id: 'i_uraddal_107', name: 'Urad Dal 26Kg', sku: 'DAL-URAD-26KG', rate: 38, stock_on_hand: 1500, tax_percentage: 0, unit: '26Kg Bags' },
+    { item_id: 'i_maaza_av_108', name: 'Maaza Aloe Vera', sku: 'MZA-AV', rate: 10, stock_on_hand: 5000, tax_percentage: 5, unit: 'packs' },
+    { item_id: 'i_maaza_bn_109', name: 'Maaza Banana', sku: 'MZA-BANANA', rate: 12, stock_on_hand: 5000, tax_percentage: 5, unit: 'packs' }
   ];
 
   /**
@@ -635,6 +638,25 @@ export class ZohoService {
     if (config.MOCK_ALL) {
       const currencyDetails = await this.getOrganizationCurrency();
       console.log(`[ZohoService] [MOCK] Fetching Sales Order by number: ${salesOrderNumber}`);
+
+      // SO-00028 mock: contains Maaza Aloe Vera and Maaza Banana
+      if (salesOrderNumber.toUpperCase() === 'SO-00028') {
+        return {
+          salesorder_id: `so_mock_00028`,
+          salesorder_number: 'SO-00028',
+          customer_id: 'c_sriya_eu_001',
+          customer_name: 'Sriya Exports EU',
+          currency_symbol: currencyDetails.symbol,
+          currency_code: currencyDetails.code,
+          line_items: [
+            { item_id: 'i_maaza_av_108', name: 'Maaza Aloe Vera', quantity: 10, rate: 10, unit: 'packs', line_item_id: 'li_maaza_av_001' },
+            { item_id: 'i_maaza_bn_109', name: 'Maaza Banana', quantity: 10, rate: 12, unit: 'packs', line_item_id: 'li_maaza_bn_002' }
+          ],
+          notes: 'Created via WhatsApp Voice Automation',
+          shipment_date: new Date().toISOString().split('T')[0]
+        };
+      }
+
       return {
         salesorder_id: `so_mock_${salesOrderNumber.replace(/\D/g, '') || '12345'}`,
         salesorder_number: salesOrderNumber,

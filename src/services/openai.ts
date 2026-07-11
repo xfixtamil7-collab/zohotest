@@ -199,6 +199,36 @@ Input name: "${rawName}"`;
         };
       }
 
+      // Urad Dal 26Kg scenario — Total €21,940, price range €35–€40
+      if (cleanText.includes('urad') || cleanText.includes('dal') || cleanText.includes('21940') || cleanText.includes('21,940')) {
+        const targetTotal = 21940;
+        const priceMin = 35;
+        const priceMax = 40;
+        return {
+          action: 'CREATE',
+          draft: {
+            spokenCustomerName: '',
+            currency: '€',
+            currencyCode: 'EUR',
+            items: [
+              {
+                name: 'Urad Dal 26Kg',
+                quantity: 1, // placeholder — queue.ts inferOptimalQuantity will compute the exact qty
+                rate: 38,    // placeholder — will be corrected to exact rate
+                priceRangeMin: priceMin,
+                priceRangeMax: priceMax,
+                inferredQuantity: true,
+                targetTotal: targetTotal,
+                currency: '€',
+                currencyCode: 'EUR',
+                unit: '26Kg Bags'
+              }
+            ],
+            notes: `Qty auto-inferred from target total €${targetTotal} within price range €${priceMin}–€${priceMax}/bag`
+          }
+        };
+      }
+
       // Rice bag 25Kg scenario
       if (cleanText.includes('rice') || cleanText.includes('rice bag')) {
         const targetTotal = 35961.34;
@@ -398,7 +428,25 @@ Respond in strict JSON:
           cementItem.quantity = 20;
         }
       }
-      
+
+      // Maaza reference updates
+      if (correctionTranscription.toLowerCase().includes('maaza') || correctionTranscription.toLowerCase().includes('reference')) {
+        // Maaza Aloe Vera → 2packs
+        if (correctionTranscription.toLowerCase().includes('aloe') || (correctionTranscription.toLowerCase().includes('maaza') && correctionTranscription.toLowerCase().includes('2'))) {
+          const aloeItem = updatedDraft.items.find(i => i.name.toLowerCase().includes('aloe'));
+          if (aloeItem) {
+            aloeItem.reference = '2packs';
+          }
+        }
+        // Maaza Banana → 6 packs
+        if (correctionTranscription.toLowerCase().includes('banana') || (correctionTranscription.toLowerCase().includes('maaza') && correctionTranscription.toLowerCase().includes('6'))) {
+          const bananaItem = updatedDraft.items.find(i => i.name.toLowerCase().includes('banana'));
+          if (bananaItem) {
+            bananaItem.reference = '6 packs';
+          }
+        }
+      }
+
       // Update notes with correction log
       updatedDraft.notes = `${updatedDraft.notes || ''} (Updated: ${correctionTranscription})`;
       return updatedDraft;
