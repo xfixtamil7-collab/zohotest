@@ -39,7 +39,12 @@ export class OpenAIService {
       const transcription = await openai.audio.transcriptions.create({
         file: fs.createReadStream(filePath),
         model: 'whisper-1',
-        prompt: 'Murugan Stores ku 10 cement, 5 steel rod podunga. Maathunga. Vendam. Seri. Ok. Bill podunga. Invoice podunga. SO-12345 edit pannunga. INV-12345 maathunga. Quantity 10. Rate 500. Cement, steel rod, brick, sand, rice bag. Correct ah varanum. Polaam. Confirm pannunga. Cancel pannunga. Customer name, company name, order, total amount.',
+        // NOTE: No language lock - Whisper auto-detects Tamil/Tanglish/French/English.
+        // The prompt guides Whisper with:
+        //   1. Key Tanglish vocabulary so it outputs words like 'podunga', 'maathunga' in Latin script.
+        //   2. French product names that users say phonetically in Tamil (e.g. "Masa" = "Masque",
+        //      "Mango" = "Mangue", "Alo Wera" = "Aloe Vera") so Whisper maps them correctly.
+        prompt: 'Murugan Stores ku 10 cement, 5 steel rod podunga. Maathunga. Vendam. Seri. Ok. Bill podunga. Invoice podunga. SO-12345 edit pannunga. INV-12345 maathunga. Quantity 10. Rate 500. Cement, steel rod, brick, sand, rice bag. Correct ah varanum. Polaam. Confirm pannunga. Cancel pannunga. Customer name, company name, order, total amount. Masque Mangue. Masque Aloe Vera. Masque Fraise. Masque Citron. Masque Ananas. Masque Noix de Coco. Masque Banane. Masque Peche. Crème. Gel. Sérum. Lotion. Savon. Shampoing. Euro. Quantity 4. Rate 8.30. Chinna RR. Masa mango. Masa alovera.',
       });
       return transcription.text;
     } catch (error) {
@@ -295,6 +300,17 @@ Input name: "${rawName}"`;
       const systemPrompt = `You are a Senior Order Parser AI. Your job is to extract business details from WhatsApp voice note transcriptions, handling complex pricing and quantity inference scenarios.
 
 The language used can be English, Tamil, or Tanglish (Tamil transliterated in English alphabet).
+IMPORTANT CONTEXT: This business sells products whose names are stored in FRENCH (e.g. "Masque Mangue", "Masque Aloe Vera", "Masque Fraise", "Crème Citron"). Customers often speak these French product names PHONETICALLY in Tamil:
+  - "Masa mango" or "Masa Mangue" → French product "Masque Mangue"
+  - "Masa alovera" or "Masa Alo Wera" → French product "Masque Aloe Vera"
+  - "Masa fraise" or "Masa frès" → French product "Masque Fraise"
+  - "Masa citron" → French product "Masque Citron"
+  - "Masa ananas" → French product "Masque Ananas"
+  - "Masa banane" → French product "Masque Banane"
+  - "Krem" / "Cream" → French product "Crème ..."
+  - "Savon" → French product "Savon ..."
+For product names: OUTPUT the FRENCH product name (e.g. "Masque Mangue") if you can clearly identify it, OR output the phonetic spoken form (e.g. "Masa mango") if you are not certain — the downstream matcher will handle cross-language matching either way.
+
 Common Tamil/Tanglish phrases and their meanings:
 - "podunga" / "podu" / "போடுங்க" / "போடு" = place/put/add
 - "maathunga" / "maathu" / "மாத்துங்க" / "மாத்து" = change/update
