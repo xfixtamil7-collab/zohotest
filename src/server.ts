@@ -685,31 +685,53 @@ export function createServer() {
 
 
   app.post('/api/transcribe-tanglish', upload.single('audio'), async (req: Request, res: Response) => {
+    let renamedPath: string | null = null;
     try {
       const file = req.file;
       if (!file) {
         return res.status(400).json({ error: 'No audio file provided' });
       }
 
-      console.log(`[Transcription API] Transcribing uploaded audio file: ${file.path}`);
-      
+      // Whisper requires a file with a proper extension to detect audio format.
+      // Multer saves files without extensions, so we must rename before transcribing.
+      const mimeToExt: Record<string, string> = {
+        'audio/webm': 'webm',
+        'audio/ogg': 'ogg',
+        'audio/mp4': 'mp4',
+        'audio/mpeg': 'mp3',
+        'audio/mp3': 'mp3',
+        'audio/wav': 'wav',
+        'audio/x-wav': 'wav',
+        'audio/flac': 'flac',
+        'audio/m4a': 'm4a',
+        'audio/x-m4a': 'm4a',
+      };
+      const baseMime = (file.mimetype || '').split(';')[0].trim().toLowerCase();
+      const ext = mimeToExt[baseMime] || 'webm';
+      renamedPath = `${file.path}.${ext}`;
+
+      fs.renameSync(file.path, renamedPath);
+      console.log(`[Transcription API] Audio saved as: ${renamedPath} (MIME: ${file.mimetype})`);
+
       // Step 1: Transcribe using OpenAIService
-      const transcriptionText = await OpenAIService.transcribeAudio(file.path);
+      const transcriptionText = await OpenAIService.transcribeAudio(renamedPath);
       console.log(`[Transcription API] Raw transcription: "${transcriptionText}"`);
 
       // Step 2: Convert/transliterate transcription to Tanglish
       const tanglishText = await OpenAIService.convertToTanglish(transcriptionText);
       console.log(`[Transcription API] Converted Tanglish: "${tanglishText}"`);
 
-      // Clean up the temporary file
-      fs.unlink(file.path, (err) => {
-        if (err) console.error('[Transcription API] Failed to delete temp file:', err);
-      });
-
       res.json({ success: true, transcription: transcriptionText, tanglish: tanglishText });
     } catch (error: any) {
       console.error('[Transcription API] Error:', error);
       res.status(500).json({ error: error.message || 'Failed to transcribe audio' });
+    } finally {
+      // Clean up the renamed temp file
+      if (renamedPath) {
+        fs.unlink(renamedPath, (err) => {
+          if (err) console.error('[Transcription API] Failed to delete temp file:', err);
+        });
+      }
     }
   });
 
