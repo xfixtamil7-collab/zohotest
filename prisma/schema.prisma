@@ -30,6 +30,7 @@ model OrderLog {
   invoicePdf         String?  // Zoho Invoice PDF URL
   status             String   // e.g. "SALES_ORDER_CREATED", "INVOICED", "CANCELLED"
   totalAmount        Float
+  zohoAccountId      String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }
@@ -41,3 +42,18 @@ model CustomerMapping {
   zohoCustomerName String
   createdAt        DateTime @default(now())
 }
+
+// ZohoAccount model stores credentials and configuration for Zoho accounts
+model ZohoAccount {
+  id           String   @id @default(uuid())
+  name         String
+  clientId     String
+  clientSecret String
+  refreshToken String
+  orgId        String
+  region       String   @default("in")
+  isActive     Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+

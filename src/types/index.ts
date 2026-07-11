@@ -2,7 +2,19 @@ export interface DraftItem {
   name: string;             // Spoken or parsed product name
   quantity: number;
   rate?: number;            // Custom rate from user, if spoken (e.g. "at 500 rupees")
-  
+  reference?: string;       // Line item reference (Zoho custom field cf_reference, e.g. "1 Pallet")
+  zohoLineItemId?: string;  // Existing line_item_id from Zoho — needed for updates to avoid duplicates
+
+  // Price range support (e.g. "30€-40€ per bag")
+  priceRangeMin?: number;   // Lower bound of price range
+  priceRangeMax?: number;   // Upper bound of price range
+  inferredQuantity?: boolean; // true if qty was auto-calculated from a target total
+  targetTotal?: number;     // The stated total amount user wants to reach
+
+  // Currency info (item-level, mirrors order-level)
+  currency?: string;        // Symbol e.g. '€', '₹', '$'
+  currencyCode?: string;    // ISO code e.g. 'EUR', 'INR', 'USD'
+
   // Resolved info from Zoho Inventory lookup & fuzzy matching
   zohoItemId?: string;
   zohoItemName?: string;
@@ -17,24 +29,33 @@ export interface DraftItem {
 
 export interface DraftOrder {
   spokenCustomerName: string;
-  
+
   // Resolved info from Zoho Contact lookup
   zohoCustomerId?: string;
   zohoCustomerName?: string;
   customerMatchedStatus?: 'MATCHED' | 'FUZZY_MATCHED' | 'NOT_FOUND';
   customerMatchScore?: number;
-  
+
   items: DraftItem[];
   deliveryDate?: string;
   notes?: string;
   paymentTerms?: string;
-  
+
+  // Currency info (order-level)
+  currency?: string;        // Symbol e.g. '€', '₹', '$'
+  currencyCode?: string;    // ISO code e.g. 'EUR', 'INR', 'USD'
+
   // Financial calculations
   totalAmount?: number;     // Excl. tax
   taxAmount?: number;
   grandTotal?: number;      // Incl. tax
-  
-  warnings?: string[];       // Alerts e.g. "Item Cement out of stock"
+
+  warnings?: string[];      // Alerts e.g. "Item Cement out of stock"
+  editingSalesOrderId?: string;
+  editingSalesOrderNumber?: string;
+  editingInvoiceId?: string;
+  editingInvoiceNumber?: string;
+  editCorrection?: string;
 }
 
 export interface SessionData {

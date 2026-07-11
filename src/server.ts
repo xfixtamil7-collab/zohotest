@@ -1,13 +1,26 @@
 import express, { Request, Response } from 'express';
+import session from 'express-session';
 import cors from 'cors';
 import path from 'path';
+import fs from 'fs';
 import multer from 'multer';
+import axios from 'axios';
 import { config } from './config';
 import { QueueService } from './queue';
 import { SessionService } from './services/session';
 import { WhatsAppService } from './services/whatsapp';
 import { ZohoService } from './services/zoho';
+import { OpenAIService } from './services/openai';
 import { WebhookMessage } from './types';
+import { prisma } from './prisma';
+
+declare module 'express-session' {
+  interface SessionData {
+    authenticated?: boolean;
+  }
+}
+
+
 
 // Configure file upload handler for simulator
 const upload = multer({
@@ -23,8 +36,70 @@ export function createServer() {
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
+  // Session Configuration (Auto-logout after 1 hour of inactivity)
+  app.use(session({
+    secret: config.SESSION_SECRET,
+    resave: false,
+    saveUninitialized: false,
+    rolling: true,
+    cookie: {
+      maxAge: 60 * 60 * 1000 // 1 hour
+    }
+  }));
+
+  // Authentication Middleware
+  const requireAuth = (req: Request, res: Response, next: express.NextFunction) => {
+    if (
+      req.path === '/login' || 
+      req.path === '/styles.css' || 
+      req.path === '/favicon.ico' ||
+      (req.path.startsWith('/webhook/whatsapp') && req.path !== '/webhook/whatsapp-simulate')
+    ) {
+      return next();
+    }
+    
+    if (req.session && req.session.authenticated) {
+      return next();
+    }
+    
+    if (req.method === 'GET' && !req.path.startsWith('/api')) {
+      res.redirect('/login');
+    } else {
+      res.status(401).json({ error: 'Unauthorized. Please login.' });
+    }
+  };
+
+  app.use(requireAuth);
+
   // Serve Dashboard Static Assets
   app.use(express.static(path.join(__dirname, 'public')));
+
+  // Auth Routes
+  app.get('/login', (req: Request, res: Response) => {
+    if (req.session && req.session.authenticated) {
+      return res.redirect('/');
+    }
+    res.sendFile(path.join(__dirname, 'public', 'login.html'));
+  });
+
+  app.post('/login', (req: Request, res: Response) => {
+    const { username, password } = req.body;
+    if (username === config.DASHBOARD_USERNAME && password === config.DASHBOARD_PASSWORD) {
+      req.session.authenticated = true;
+      res.redirect('/');
+    } else {
+      res.redirect('/login?error=invalid');
+    }
+  });
+
+  app.post('/logout', (req: Request, res: Response) => {
+    req.session.destroy((err) => {
+      if (err) {
+        console.error('[Auth] Error destroying session on logout:', err);
+      }
+      res.redirect('/login');
+    });
+  });
 
   // Standard index route fallback to dashboard
   app.get('/', (req: Request, res: Response) => {
@@ -222,6 +297,156 @@ export function createServer() {
     }
   });
 
+  // Get current system configuration status
+  app.get('/api/config', async (req: Request, res: Response) => {
+    try {
+      const active = await prisma.zohoAccount.findFirst({ where: { isActive: true } });
+      const currencyDetails = await ZohoService.getOrganizationCurrency();
+      res.json({
+        mockMode: config.MOCK_ALL,
+        region: active ? active.region : '',
+        orgId: active ? active.orgId : '',
+        accountName: active ? active.name : 'None',
+        currencySymbol: currencyDetails.symbol,
+        currencyCode: currencyDetails.code
+      });
+    } catch (e: any) {
+      res.json({
+        mockMode: config.MOCK_ALL,
+        region: '',
+        orgId: '',
+        accountName: 'None',
+        currencySymbol: '₹',
+        currencyCode: 'INR'
+      });
+    }
+  });
+
+  // Get all connected Zoho accounts
+  app.get('/api/zoho-accounts', async (req: Request, res: Response) => {
+    try {
+      const accounts = await prisma.zohoAccount.findMany({
+        orderBy: { createdAt: 'desc' }
+      });
+      res.json(accounts);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Add new Zoho account
+  app.post('/api/zoho-accounts', async (req: Request, res: Response) => {
+    try {
+      const { name, clientId, clientSecret, refreshToken, orgId, region } = req.body;
+      if (!name || !clientId || !clientSecret || !refreshToken || !orgId || !region) {
+        return res.status(400).json({ error: 'All fields are required.' });
+      }
+
+      let finalRefreshToken = refreshToken;
+
+      // Check if credentials are valid
+      if (!config.MOCK_ALL) {
+        const validation = await ZohoService.validateCredentials({
+          clientId,
+          clientSecret,
+          refreshToken,
+          region
+        });
+        if (!validation.isValid) {
+          return res.status(400).json({ error: `Failed to authenticate with Zoho: ${validation.error || 'Unknown error'}` });
+        }
+        if (validation.refreshToken) {
+          finalRefreshToken = validation.refreshToken;
+        }
+      }
+
+      // If this is the first account, make it active
+      const count = await prisma.zohoAccount.count();
+      const isActive = count === 0;
+
+      const account = await prisma.zohoAccount.create({
+        data: {
+          name,
+          clientId,
+          clientSecret,
+          refreshToken: finalRefreshToken,
+          orgId,
+          region,
+          isActive
+        }
+      });
+
+      res.json({ success: true, account });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Activate Zoho account
+  app.post('/api/zoho-accounts/activate', async (req: Request, res: Response) => {
+    try {
+      const { id } = req.body;
+      
+      if (!id || id === 'none') {
+        await prisma.zohoAccount.updateMany({
+          data: { isActive: false }
+        });
+        return res.json({ success: true, account: { name: 'None' } });
+      }
+
+      // Set all other accounts to inactive
+      await prisma.zohoAccount.updateMany({
+        where: { id: { not: id } },
+        data: { isActive: false }
+      });
+
+      // Set target account to active
+      const updated = await prisma.zohoAccount.update({
+        where: { id },
+        data: { isActive: true }
+      });
+
+      res.json({ success: true, account: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // Delete Zoho account
+  app.delete('/api/zoho-accounts/:id', async (req: Request, res: Response) => {
+    try {
+      const { id } = req.params;
+      
+      const accountToDelete = await prisma.zohoAccount.findUnique({
+        where: { id }
+      });
+
+      if (!accountToDelete) {
+        return res.status(404).json({ error: 'Account not found' });
+      }
+
+      await prisma.zohoAccount.delete({
+        where: { id }
+      });
+
+      // If the deleted account was active, make another one active
+      if (accountToDelete.isActive) {
+        const nextAccount = await prisma.zohoAccount.findFirst();
+        if (nextAccount) {
+          await prisma.zohoAccount.update({
+            where: { id: nextAccount.id },
+            data: { isActive: true }
+          });
+        }
+      }
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+
   // Outgoing messages logs for dashboard chat frame
   app.get('/api/whatsapp/logs', (req: Request, res: Response) => {
     res.json(WhatsAppService.sentMessagesLog);
@@ -231,6 +456,313 @@ export function createServer() {
   app.post('/api/whatsapp/logs/clear', (req: Request, res: Response) => {
     WhatsAppService.sentMessagesLog = [];
     res.json({ success: true });
+  });
+
+  // Get all sales order and invoice logs — filtered by the currently active Zoho account
+  app.get('/api/orders/logs', async (req: Request, res: Response) => {
+    try {
+      const activeAccount = await ZohoService.getActiveAccount();
+
+      // Build filter: if an active account exists, only return logs belonging to it.
+      // Logs with no zohoAccountId (created before this feature) are shown only when
+      // there is no active account, or can be shown alongside for legacy compatibility.
+      const where = activeAccount
+        ? { zohoAccountId: activeAccount.id }
+        : {};
+
+      const logs = await prisma.orderLog.findMany({
+        where,
+        orderBy: { updatedAt: 'desc' }
+      });
+      res.json(logs);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ----------------------------------------------------
+  // France Company Lookup via Official Open Data API
+  // Uses: recherche-entreprises.api.gouv.fr (free, no key needed)
+  // ----------------------------------------------------
+
+  /**
+   * GET /api/france/lookup?q=<siret_or_siren_or_name>
+   * Looks up a French company by SIRET, SIREN, or company name using
+   * the official French government open data API (free, no API key required).
+   */
+  app.get('/api/france/lookup', async (req: Request, res: Response) => {
+    const query = (req.query.q as string || '').trim();
+    if (!query || query.length < 3) {
+      return res.status(400).json({ error: 'Query must be at least 3 characters.' });
+    }
+
+    try {
+      const cleanQuery = query.replace(/\s/g, '');
+
+      // Official French govt open-data API — no auth required
+      const apiUrl = `https://recherche-entreprises.api.gouv.fr/search?q=${encodeURIComponent(query)}&per_page=5&mtq=ph`;
+
+      console.log(`[France Lookup] Querying: ${apiUrl}`);
+
+      const apiRes = await axios.get(apiUrl, {
+        headers: { Accept: 'application/json' },
+        timeout: 10000
+      });
+
+      const data = apiRes.data;
+      const rawResults: any[] = data.results || [];
+
+      if (!rawResults || rawResults.length === 0) {
+        return res.json({ found: false, results: [] });
+      }
+
+      /**
+       * Compute French EU VAT number from SIREN
+       * Official formula: "FR" + ((12 + 3 * (SIREN % 97)) % 97) + SIREN
+       */
+      function computeVAT(siren: string): string {
+        const s = parseInt(siren, 10);
+        if (isNaN(s)) return '';
+        const key = (12 + 3 * (s % 97)) % 97;
+        return `FR${String(key).padStart(2, '0')}${siren}`;
+      }
+
+      /**
+       * Fallback to query societe.com search redirect to get the company page and parse dirigeants
+       */
+      async function fetchDirigeantFromSocieteCom(siren: string): Promise<{ name: string; jobTitle: string } | null> {
+        try {
+          const url = `https://www.societe.com/cgi-bin/search?q=${siren}`;
+          console.log(`[France Lookup] [Societe.com Fallback] Fetching redirect search for SIREN: ${siren}`);
+          const res = await axios.get(url, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept': 'text/html'
+            },
+            timeout: 5000
+          });
+          const html = res.data;
+          const match = html.match(/"name"\s*:\s*"([^"]+)"\s*,\s*"jobTitle"/);
+          if (match && match[1]) {
+            const name = match[1].replace(/\\u([0-9a-fA-F]{4})/g, (g: string, m: string) => String.fromCharCode(parseInt(m, 16)));
+            let jobTitle = 'Dirigeant';
+            const jobMatch = html.match(/"jobTitle"\s*:\s*"([^"]+)"/);
+            if (jobMatch && jobMatch[1]) {
+              jobTitle = jobMatch[1].replace(/\\u([0-9a-fA-F]{4})/g, (g: string, m: string) => String.fromCharCode(parseInt(m, 16)));
+            }
+            return { name, jobTitle };
+          }
+        } catch (err: any) {
+          console.warn(`[France Lookup] [Societe.com Fallback] Failed to fetch/parse for ${siren}: ${err.message}`);
+        }
+        return null;
+      }
+
+      const results = await Promise.all(rawResults.map(async (r: any) => {
+        const siren: string = r.siren || '';
+        const siege = r.siege || {};
+        const siret: string = siege.siret || (siren ? siren + '00001' : '');
+        const vatNumber = r.numero_tva_intra || computeVAT(siren);
+
+        // Build street from adresse field or components
+        const street: string = siege.adresse || [
+          siege.numero_voie,
+          siege.type_voie,
+          siege.libelle_voie
+        ].filter(Boolean).join(' ');
+
+        const companyName: string =
+          r.nom_complet ||
+          r.denomination ||
+          r.nom_raison_sociale ||
+          '';
+
+        // Extract first dirigeant (company director) name
+        let dirigeantName = '';
+        let dirigeantQualite = '';
+        const dirigeants: any[] = r.dirigeants || [];
+        if (dirigeants.length > 0) {
+          const d = dirigeants[0];
+          if (d.type_dirigeant === 'personne physique') {
+            // Physical person: format as "Firstname LASTNAME"
+            const prenom = d.prenoms ? d.prenoms.split(' ')[0] : '';
+            const nom = d.nom || '';
+            // Capitalize first letter of firstname, uppercase lastname
+            const prenomFmt = prenom.charAt(0).toUpperCase() + prenom.slice(1).toLowerCase();
+            dirigeantName = [prenomFmt, nom.toUpperCase()].filter(Boolean).join(' ');
+          } else {
+            // Legal entity: use denomination
+            dirigeantName = d.denomination || '';
+          }
+          dirigeantQualite = d.qualite || '';
+        }
+
+        // Fallback to societe.com if official API has no dirigentes listed
+        if (!dirigeantName && siren) {
+          const fb = await fetchDirigeantFromSocieteCom(siren);
+          if (fb) {
+            dirigeantName = fb.name;
+            dirigeantQualite = fb.jobTitle;
+          }
+        }
+
+        let dirigeantFirstName = '';
+        let dirigeantLastName = '';
+        if (dirigeantName) {
+          const parsed = await OpenAIService.parseDirectorName(dirigeantName);
+          dirigeantFirstName = parsed.firstName;
+          dirigeantLastName = parsed.lastName;
+          // Re-format complete display name correctly
+          dirigeantName = `${dirigeantFirstName} ${dirigeantLastName}`.trim();
+        }
+
+        return {
+          siret,
+          siren,
+          companyName,
+          vatNumber,
+          dirigeantName,
+          dirigeantFirstName,
+          dirigeantLastName,
+          dirigeantQualite,
+          address: {
+            street,
+            city: siege.libelle_commune || siege.commune || '',
+            postalCode: siege.code_postal || '',
+            country: 'France',
+            countryCode: 'FR'
+          }
+        };
+      }));
+
+
+
+
+      return res.json({ found: true, results });
+
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        return res.json({ found: false, results: [] });
+      }
+      const errMsg = error.response?.data?.message || error.message || 'Unknown error';
+      console.error('[France Lookup] API error:', error.response?.status, errMsg);
+      return res.status(500).json({
+        error: `Company lookup failed: ${errMsg}. Please try again.`
+      });
+    }
+  });
+
+  /**
+   * POST /api/zoho/create-customer
+   * Creates a new customer contact in Zoho Inventory.
+   */
+  app.post('/api/zoho/create-customer', async (req: Request, res: Response) => {
+    try {
+      const { contactName, companyName, email, phone, vatNumber, billingAddress, siret, siren } = req.body;
+
+      if (!contactName || !companyName) {
+        return res.status(400).json({ error: 'contactName and companyName are required.' });
+      }
+
+      const result = await ZohoService.createCustomer({
+        contactName,
+        companyName,
+        email,
+        phone,
+        vatNumber,
+        billingAddress,
+        siret,
+        siren
+      });
+
+      console.log(`[API] Created customer: ${result.companyName} (${result.contactId})`);
+      res.json({ success: true, contact: result });
+    } catch (error: any) {
+      console.error('[API] Failed to create customer:', error.message);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+
+  app.post('/api/transcribe-tanglish', upload.single('audio'), async (req: Request, res: Response) => {
+    try {
+      const file = req.file;
+      if (!file) {
+        return res.status(400).json({ error: 'No audio file provided' });
+      }
+
+      console.log(`[Transcription API] Transcribing uploaded audio file: ${file.path}`);
+      
+      // Step 1: Transcribe using OpenAIService
+      const transcriptionText = await OpenAIService.transcribeAudio(file.path);
+      console.log(`[Transcription API] Raw transcription: "${transcriptionText}"`);
+
+      // Step 2: Convert/transliterate transcription to Tanglish
+      const tanglishText = await OpenAIService.convertToTanglish(transcriptionText);
+      console.log(`[Transcription API] Converted Tanglish: "${tanglishText}"`);
+
+      // Clean up the temporary file
+      fs.unlink(file.path, (err) => {
+        if (err) console.error('[Transcription API] Failed to delete temp file:', err);
+      });
+
+      res.json({ success: true, transcription: transcriptionText, tanglish: tanglishText });
+    } catch (error: any) {
+      console.error('[Transcription API] Error:', error);
+      res.status(500).json({ error: error.message || 'Failed to transcribe audio' });
+    }
+  });
+
+  // Download Sales Order PDF
+  app.get('/api/download/salesorder/:id', async (req: Request, res: Response) => {
+    try {
+      const salesOrderId = req.params.id;
+      let fileName = `SalesOrder_${salesOrderId}.pdf`;
+      try {
+        const orderLog = await prisma.orderLog.findFirst({
+          where: { salesOrderId }
+        });
+        if (orderLog && orderLog.salesOrderNumber) {
+          fileName = `${orderLog.salesOrderNumber}.pdf`;
+        }
+      } catch (err) {
+        // Ignore and use default filename
+      }
+
+      const pdfBuffer = await ZohoService.getSalesOrderPdf(salesOrderId);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.send(pdfBuffer);
+    } catch (error: any) {
+      console.error('[API] Failed to download sales order PDF:', error.message);
+      res.status(500).json({ error: 'Failed to download PDF.' });
+    }
+  });
+
+  // Download Invoice PDF
+  app.get('/api/download/invoice/:id', async (req: Request, res: Response) => {
+    try {
+      const invoiceId = req.params.id;
+      let fileName = `Invoice_${invoiceId}.pdf`;
+      try {
+        const orderLog = await prisma.orderLog.findFirst({
+          where: { invoiceId }
+        });
+        if (orderLog && orderLog.invoiceNumber) {
+          fileName = `${orderLog.invoiceNumber}.pdf`;
+        }
+      } catch (err) {
+        // Ignore and use default filename
+      }
+
+      const pdfBuffer = await ZohoService.getInvoicePdf(invoiceId);
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+      res.send(pdfBuffer);
+    } catch (error: any) {
+      console.error('[API] Failed to download invoice PDF:', error.message);
+      res.status(500).json({ error: 'Failed to download PDF.' });
+    }
   });
 
   return app;

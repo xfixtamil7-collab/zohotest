@@ -142,10 +142,104 @@ export class QueueService {
         return;
       }
 
+      if (action === 'EDIT') {
+        const soNumber = parsedDraft.editingSalesOrderNumber;
+        const invNumber = parsedDraft.editingInvoiceNumber;
+        
+        if (!soNumber && !invNumber) {
+          await WhatsAppService.sendTextMessage(from, '⚠️ Please specify a valid Sales Order number (e.g. SO-12345) or Invoice number (e.g. INV-12345) to edit.');
+          return;
+        }
+
+        let fetchedDraft: DraftOrder;
+
+        try {
+          if (soNumber) {
+            console.log(`[QueueService] Fetching Sales Order details for ${soNumber}`);
+            const salesOrder = await ZohoService.getSalesOrderByNumber(soNumber);
+            const currencyDetails = await ZohoService.getOrganizationCurrency();
+            fetchedDraft = {
+              spokenCustomerName: salesOrder.customer_name,
+              zohoCustomerId: salesOrder.customer_id,
+              zohoCustomerName: salesOrder.customer_name,
+              editingSalesOrderId: salesOrder.salesorder_id,
+              editingSalesOrderNumber: salesOrder.salesorder_number,
+              currency: salesOrder.currency_symbol || currencyDetails.symbol,
+              currencyCode: salesOrder.currency_code || currencyDetails.code,
+              items: (salesOrder.line_items || []).map((it: any) => ({
+                name: it.name,
+                zohoItemId: it.item_id,
+                zohoItemName: it.name,
+                zohoLineItemId: it.line_item_id,
+                quantity: it.quantity,
+                rate: it.rate,
+                zohoRate: it.rate,
+                unit: it.unit,
+                reference: it.custom_field_hash?.cf_reference || undefined
+              })),
+              notes: salesOrder.notes,
+              deliveryDate: salesOrder.shipment_date
+            };
+          } else {
+            console.log(`[QueueService] Fetching Invoice details for ${invNumber}`);
+            const invoice = await ZohoService.getInvoiceByNumber(invNumber!);
+            const currencyDetails = await ZohoService.getOrganizationCurrency();
+            fetchedDraft = {
+              spokenCustomerName: invoice.customer_name,
+              zohoCustomerId: invoice.role === 'customer' ? invoice.customer_id : (invoice.customer_id || ''),
+              zohoCustomerName: invoice.customer_name,
+              editingInvoiceId: invoice.invoice_id,
+              editingInvoiceNumber: invoice.invoice_number,
+              currency: invoice.currency_symbol || currencyDetails.symbol,
+              currencyCode: invoice.currency_code || currencyDetails.code,
+              items: (invoice.line_items || []).map((it: any) => ({
+                name: it.name,
+                zohoItemId: it.item_id,
+                zohoItemName: it.name,
+                zohoLineItemId: it.line_item_id,
+                quantity: it.quantity,
+                rate: it.rate,
+                zohoRate: it.rate,
+                unit: it.unit,
+                reference: it.custom_field_hash?.cf_reference || undefined
+              })),
+              notes: invoice.notes
+            };
+          }
+        } catch (err: any) {
+          console.error(`[QueueService] Failed to fetch target details for edit:`, err.message);
+          await WhatsAppService.sendTextMessage(from, `⚠️ Error: Could not find or load order details: ${err.message}`);
+          return;
+        }
+
+        // Apply voice/text correction if correction details exist
+        let newDraft = fetchedDraft;
+        const correctionText = parsedDraft.editCorrection || transcription;
+        // Check if there is actual editing content inside transcription beyond just loading the target
+        const hasCorrection = correctionText.toLowerCase().replace(/so-?\d+|inv-?\d+|edit|update|change|maathu|maathunga/g, '').trim().length > 2;
+
+        if (hasCorrection) {
+          console.log(`[QueueService] Applying edit correction: "${correctionText}"`);
+          newDraft = await OpenAIService.mergeCorrection(fetchedDraft, correctionText);
+        }
+
+        // Validate and enrich
+        await this.validateAndEnrichDraft(newDraft);
+
+        // Save session & set state to AWAITING_CONFIRMATION
+        await SessionService.saveSession(from, 'AWAITING_CONFIRMATION', newDraft);
+
+        // Send draft review confirmation message
+        await this.sendDraftConfirmation(from, newDraft);
+        return;
+      }
+
       // If user confirms a draft
       if (action === 'CONFIRM') {
         if (session.state === 'AWAITING_CONFIRMATION' && session.draft) {
           const draft = session.draft;
+          const activeAccount = await ZohoService.getActiveAccount();
+          const zohoAccountId = activeAccount?.id || null;
           
           if (!draft.zohoCustomerId) {
             await WhatsAppService.sendTextMessage(
@@ -164,11 +258,134 @@ export class QueueService {
             return;
           }
 
+          // If editing an existing Sales Order
+          if (draft.editingSalesOrderId) {
+            console.log(`[QueueService] Updating existing Sales Order ${draft.editingSalesOrderNumber}`);
+            
+            const salesOrderItems = matchedItems.map(it => ({
+              itemId: it.zohoItemId!,
+              quantity: it.quantity,
+              rate: it.rate ?? it.zohoRate ?? 0,
+              reference: it.reference,
+              zohoLineItemId: it.zohoLineItemId
+            }));
+
+            const soResponse = await ZohoService.updateSalesOrder(draft.editingSalesOrderId, {
+              customerId: draft.zohoCustomerId,
+              items: salesOrderItems,
+              notes: draft.notes,
+              deliveryDate: draft.deliveryDate
+            });
+
+            // Update DB Log or create if missing
+            const existingLog = await prisma.orderLog.findFirst({
+              where: { salesOrderId: draft.editingSalesOrderId }
+            });
+
+            if (existingLog) {
+              await prisma.orderLog.updateMany({
+                where: { salesOrderId: draft.editingSalesOrderId },
+                data: {
+                  totalAmount: draft.grandTotal || 0,
+                  status: 'SALES_ORDER_UPDATED',
+                  zohoAccountId
+                }
+              });
+            } else {
+              await prisma.orderLog.create({
+                data: {
+                  phone: from,
+                  customerName: draft.zohoCustomerName || draft.spokenCustomerName,
+                  zohoCustomerId: draft.zohoCustomerId,
+                  salesOrderId: draft.editingSalesOrderId,
+                  salesOrderNumber: draft.editingSalesOrderNumber || '',
+                  salesOrderPdf: soResponse.pdfLink,
+                  status: 'SALES_ORDER_UPDATED',
+                  totalAmount: draft.grandTotal || 0,
+                  zohoAccountId
+                }
+              });
+            }
+
+            const nextDraftState = {
+              ...draft,
+              zohoSalesOrderId: soResponse.salesOrderId,
+              salesOrderNumber: soResponse.salesOrderNumber
+            } as any;
+
+            await SessionService.saveSession(from, 'AWAITING_INVOICE_DECISION', nextDraftState);
+
+            const successMessage = `✅ *Sales Order Updated!* \n\n*Order No:* ${soResponse.salesOrderNumber}\n*Customer:* ${draft.zohoCustomerName}\n*Total:* ${draft.currency || '₹'}${draft.grandTotal?.toFixed(2)}\n📄 *PDF:* ${soResponse.pdfLink}\n\nWould you like to generate the Invoice now?`;
+            
+            await WhatsAppService.sendInteractiveButtons(from, successMessage, [
+              { id: 'btn_invoice_create', title: '📄 Create Invoice' },
+              { id: 'btn_finish', title: '🏁 Finish Flow' }
+            ]);
+            return;
+          }
+
+          // If editing an existing Invoice
+          if (draft.editingInvoiceId) {
+            console.log(`[QueueService] Updating existing Invoice ${draft.editingInvoiceNumber}`);
+
+            const invoiceItems = matchedItems.map(it => ({
+              itemId: it.zohoItemId!,
+              quantity: it.quantity,
+              rate: it.rate ?? it.zohoRate ?? 0,
+              reference: it.reference,
+              zohoLineItemId: it.zohoLineItemId
+            }));
+
+            const invResponse = await ZohoService.updateInvoice(draft.editingInvoiceId, {
+              customerId: draft.zohoCustomerId,
+              items: invoiceItems,
+              notes: draft.notes
+            });
+
+            const existingLog = await prisma.orderLog.findFirst({
+              where: { invoiceId: draft.editingInvoiceId }
+            });
+
+            if (existingLog) {
+              await prisma.orderLog.updateMany({
+                where: { invoiceId: draft.editingInvoiceId },
+                data: {
+                  totalAmount: draft.grandTotal || 0,
+                  status: 'INVOICE_UPDATED',
+                  zohoAccountId
+                }
+              });
+            } else {
+              await prisma.orderLog.create({
+                data: {
+                  phone: from,
+                  customerName: draft.zohoCustomerName || draft.spokenCustomerName,
+                  zohoCustomerId: draft.zohoCustomerId,
+                  salesOrderId: '',
+                  salesOrderNumber: '',
+                  invoiceId: draft.editingInvoiceId,
+                  invoiceNumber: draft.editingInvoiceNumber,
+                  invoicePdf: invResponse.pdfLink,
+                  status: 'INVOICE_UPDATED',
+                  totalAmount: draft.grandTotal || 0,
+                  zohoAccountId
+                }
+              });
+            }
+
+            await SessionService.clearSession(from);
+
+            const successMessage = `✅ *Invoice Updated!* \n\n*Invoice No:* ${draft.editingInvoiceNumber}\n📄 *PDF:* ${invResponse.pdfLink}\n\nThank you for using Zoho Voice Automation!`;
+            await WhatsAppService.sendTextMessage(from, successMessage);
+            return;
+          }
+
           // Create Sales Order in Zoho
           const salesOrderItems = matchedItems.map(it => ({
             itemId: it.zohoItemId!,
             quantity: it.quantity,
-            rate: it.rate ?? it.zohoRate ?? 0
+            rate: it.rate ?? it.zohoRate ?? 0,
+            reference: it.reference
           }));
 
           const soResponse = await ZohoService.createSalesOrder({
@@ -188,7 +405,8 @@ export class QueueService {
               salesOrderNumber: soResponse.salesOrderNumber,
               salesOrderPdf: soResponse.pdfLink,
               status: 'SALES_ORDER_CREATED',
-              totalAmount: draft.grandTotal || 0
+              totalAmount: draft.grandTotal || 0,
+              zohoAccountId
             }
           });
 
@@ -202,7 +420,7 @@ export class QueueService {
           await SessionService.saveSession(from, 'AWAITING_INVOICE_DECISION', nextDraftState);
 
           // Send confirmation via WhatsApp with button to create Invoice
-          const successMessage = `✅ *Sales Order Created!* \n\n*Order No:* ${soResponse.salesOrderNumber}\n*Customer:* ${draft.zohoCustomerName}\n*Total:* ₹${draft.grandTotal?.toFixed(2)}\n📄 *PDF:* ${soResponse.pdfLink}\n\nWould you like to generate the Invoice now?`;
+          const successMessage = `✅ *Sales Order Created!* \n\n*Order No:* ${soResponse.salesOrderNumber}\n*Customer:* ${draft.zohoCustomerName}\n*Total:* ${draft.currency || '₹'}${draft.grandTotal?.toFixed(2)}\n📄 *PDF:* ${soResponse.pdfLink}\n\nWould you like to generate the Invoice now?`;
           
           await WhatsAppService.sendInteractiveButtons(from, successMessage, [
             { id: 'btn_invoice_create', title: '📄 Create Invoice' },
@@ -219,6 +437,8 @@ export class QueueService {
         if (session.state === 'AWAITING_INVOICE_DECISION' && session.draft) {
           const draft: any = session.draft;
           const salesOrderId = draft.zohoSalesOrderId;
+          const activeAccount = await ZohoService.getActiveAccount();
+          const zohoAccountId = activeAccount?.id || null;
           
           if (!salesOrderId) {
             await WhatsAppService.sendTextMessage(from, '⚠️ Error: No active Sales Order ID found in session. Please start a new order.');
@@ -235,7 +455,8 @@ export class QueueService {
               invoiceId: invResponse.invoiceId,
               invoiceNumber: invResponse.invoiceNumber,
               invoicePdf: invResponse.pdfLink,
-              status: 'INVOICED'
+              status: 'INVOICED',
+              zohoAccountId
             }
           });
 
@@ -259,7 +480,7 @@ export class QueueService {
 
       // Processing a creation or a correction:
       let newDraft: DraftOrder;
-      
+
       if (session.state === 'AWAITING_CONFIRMATION' && session.draft) {
         // Step 9: Handle Voice Corrections (merge new transcription with previous draft)
         console.log(`[QueueService] Active draft exists for ${from}. Merging correction.`);
@@ -267,6 +488,23 @@ export class QueueService {
       } else {
         // Step 3: New Draft order
         newDraft = parsedDraft;
+      }
+
+      // ✨ SMART QUANTITY INFERENCE: For items with a target total + price range,
+      // find the optimal (qty, rate) pair that produces the EXACT total.
+      for (const item of newDraft.items) {
+        if (item.inferredQuantity && item.targetTotal && item.priceRangeMin !== undefined && item.priceRangeMax !== undefined) {
+          const optimal = QueueService.inferOptimalQuantity(
+            item.targetTotal,
+            item.priceRangeMin,
+            item.priceRangeMax
+          );
+          if (optimal) {
+            console.log(`[QueueService] ✨ Optimal quantity for "${item.name}": ${optimal.quantity} bags @ €${optimal.rate} = €${(optimal.quantity * optimal.rate).toFixed(2)} (target: €${item.targetTotal})`);
+            item.quantity = optimal.quantity;
+            item.rate = optimal.rate;
+          }
+        }
       }
 
       // Step 4 & 5: Validate customer and products against Zoho
@@ -359,27 +597,127 @@ export class QueueService {
     draft.totalAmount = computedTotal;
     draft.taxAmount = computedTax;
     draft.grandTotal = computedTotal + computedTax;
+
+    // Propagate currency from items if not already set at draft level
+    if (!draft.currency && draft.items.length > 0) {
+      const itemWithCurrency = draft.items.find(it => it.currency);
+      if (itemWithCurrency) {
+        draft.currency = itemWithCurrency.currency;
+        draft.currencyCode = itemWithCurrency.currencyCode;
+      }
+    }
+    // Default to Zoho organization's currency if still not set
+    if (!draft.currency) {
+      try {
+        const currencyDetails = await ZohoService.getOrganizationCurrency();
+        draft.currency = currencyDetails.symbol;
+        draft.currencyCode = currencyDetails.code;
+      } catch (err) {
+        draft.currency = '₹';
+        draft.currencyCode = 'INR';
+      }
+    }
+  }
+
+  /**
+   * ✨ Finds the optimal (quantity, rate) pair that produces EXACTLY the target total.
+   * Searches all valid quantities where rate is within [priceMin, priceMax].
+   * Prefers round quantities (1000, 500, 100, 50, 10) for cleaner orders.
+   *
+   * Example: targetTotal=37900, priceMin=30, priceMax=40
+   *   -> qty range: ceil(37900/40)=948 to floor(37900/30)=1263
+   *   -> qty=1000: rate=37.90 ✔️ (round number, within range)
+   *   -> Returns { quantity: 1000, rate: 37.90 } => 1000 × 37.90 = €37,900 ✅ exact!
+   */
+  private static inferOptimalQuantity(
+    targetTotal: number,
+    priceMin: number,
+    priceMax: number
+  ): { quantity: number; rate: number } | null {
+    const qtyMin = Math.ceil(targetTotal / priceMax);
+    const qtyMax = Math.floor(targetTotal / priceMin);
+
+    if (qtyMin > qtyMax || qtyMin <= 0) return null;
+
+    // Collect ALL valid (qty, rate) candidates
+    const candidates: { quantity: number; rate: number; roundness: number }[] = [];
+
+    for (let qty = qtyMin; qty <= qtyMax; qty++) {
+      const rate = targetTotal / qty;
+      // Rate must be within the specified price range
+      if (rate >= priceMin && rate <= priceMax) {
+        candidates.push({
+          quantity: qty,
+          rate: parseFloat(rate.toFixed(4)),
+          roundness: QueueService.getRoundness(qty)
+        });
+      }
+    }
+
+    if (candidates.length === 0) {
+      // Fallback: no exact match found, use best approximation (midpoint)
+      const midRate = (priceMin + priceMax) / 2;
+      const qty = Math.round(targetTotal / midRate);
+      return { quantity: qty, rate: parseFloat(midRate.toFixed(4)) };
+    }
+
+    // Sort by roundness DESC (prefer 1000 > 500 > 100 > 50 > 10 > others)
+    candidates.sort((a, b) => {
+      if (b.roundness !== a.roundness) return b.roundness - a.roundness;
+      // Tiebreak: prefer quantities closer to a 'nice' mid-range
+      const midQty = (qtyMin + qtyMax) / 2;
+      return Math.abs(a.quantity - midQty) - Math.abs(b.quantity - midQty);
+    });
+
+    const best = candidates[0];
+    console.log(`[QueueService] ✨ inferOptimalQuantity: ${candidates.length} candidates found. Best: qty=${best.quantity}, rate=${best.rate} (roundness=${best.roundness})`);
+    return { quantity: best.quantity, rate: best.rate };
+  }
+
+  /**
+   * Rates how "round" a number is — used to prefer cleaner order quantities.
+   * 1000 → 5, 500 → 4, 100 → 3, 50 → 2, 10 → 1, others → 0
+   */
+  private static getRoundness(n: number): number {
+    if (n % 1000 === 0) return 5;
+    if (n % 500 === 0) return 4;
+    if (n % 100 === 0) return 3;
+    if (n % 50 === 0) return 2;
+    if (n % 10 === 0) return 1;
+    return 0;
   }
 
   /**
    * Prepares and sends the confirmation text block with quick replies
    */
   private static async sendDraftConfirmation(to: string, draft: DraftOrder): Promise<void> {
-    const customerLine = draft.zohoCustomerName 
+    const cur = draft.currency || '₹';
+    const customerLine = draft.zohoCustomerName
       ? `👤 *Customer:* ${draft.zohoCustomerName} ${draft.customerMatchedStatus === 'FUZZY_MATCHED' ? '(Fuzzy Matched)' : ''}`
-      : `👤 *Customer:* ❌ Not Found (Spoke: "${draft.spokenCustomerName}")`;
+      : `👤 *Customer:* ${draft.spokenCustomerName ? `❌ Not Found (Spoke: "${draft.spokenCustomerName}")` : 'Walk-in / Not Specified'}`;
 
     let itemsLines = '';
     draft.items.forEach((it, idx) => {
       const itemTitle = it.zohoItemName || it.name;
-      const statusLabel = it.matchedStatus === 'NOT_FOUND' 
+      const statusLabel = it.matchedStatus === 'NOT_FOUND'
         ? '❌ Not Found'
         : (it.stockAvailable && it.quantity > it.stockAvailable)
           ? `⚠️ Low Stock (${it.stockAvailable} left)`
           : '✅ In Stock';
-      
+
       const rateVal = it.rate ?? 0;
-      itemsLines += `${idx + 1}. *${itemTitle}* x ${it.quantity} ${it.unit || 'units'} @ ₹${rateVal} = ₹${(it.quantity * rateVal).toFixed(2)} [${statusLabel}]\n`;
+      const lineTotal = it.quantity * rateVal;
+
+      // Price range display — show exact rate if inferred, otherwise show range
+      let priceDisplay: string;
+      if (it.priceRangeMin !== undefined && it.priceRangeMax !== undefined) {
+        priceDisplay = `${cur}${rateVal} (range: ${cur}${it.priceRangeMin}\u2013${cur}${it.priceRangeMax})`;
+      } else {
+        priceDisplay = `${cur}${rateVal}`;
+      }
+
+      const inferredBadge = it.inferredQuantity ? ' ⚡ Exact Qty Match' : '';
+      itemsLines += `${idx + 1}. *${itemTitle}* x ${it.quantity} ${it.unit || 'units'} @ ${priceDisplay} = ${cur}${lineTotal.toFixed(2)} [${statusLabel}]${inferredBadge}\n`;
     });
 
     const warningsLine = (draft.warnings && draft.warnings.length > 0)
@@ -388,10 +726,20 @@ export class QueueService {
 
     const notesLine = draft.notes ? `*Notes:* ${draft.notes}\n` : '';
 
-    const textTemplate = `📝 *Draft Sales Order Review* \n\n${customerLine}\n\n*Items:*\n${itemsLines}\n${notesLine}${warningsLine}\n*Subtotal:* ₹${draft.totalAmount?.toFixed(2)}\n*Tax:* ₹${draft.taxAmount?.toFixed(2)}\n*Grand Total:* ₹${draft.grandTotal?.toFixed(2)}\n\nReply with: \n✅ *OK / Confirm* to save.\n🎤 *Send Voice* to edit.\n❌ *Cancel* to discard.`;
+    let reviewTitle = '📝 *Draft Sales Order Review*';
+    let confirmBtnText = '✅ Confirm Order';
+    if (draft.editingSalesOrderNumber) {
+      reviewTitle = `📝 *Draft Sales Order Edit Review (${draft.editingSalesOrderNumber})*`;
+      confirmBtnText = '✅ Confirm Edit';
+    } else if (draft.editingInvoiceNumber) {
+      reviewTitle = `📝 *Draft Invoice Edit Review (${draft.editingInvoiceNumber})*`;
+      confirmBtnText = '✅ Confirm Edit';
+    }
+
+    const textTemplate = `${reviewTitle} \n\n${customerLine}\n\n*Items:*\n${itemsLines}\n${notesLine}${warningsLine}\n*Subtotal:* ${cur}${draft.totalAmount?.toFixed(2)}\n*Tax:* ${cur}${draft.taxAmount?.toFixed(2)}\n*Grand Total:* ${cur}${draft.grandTotal?.toFixed(2)}\n\nReply with: \n✅ *OK / Confirm* to save.\n🎤 *Send Voice* to edit.\n❌ *Cancel* to discard.`;
 
     await WhatsAppService.sendInteractiveButtons(to, textTemplate, [
-      { id: 'btn_confirm', title: '✅ Confirm Order' },
+      { id: 'btn_confirm', title: confirmBtnText },
       { id: 'btn_cancel', title: '❌ Cancel' }
     ]);
   }

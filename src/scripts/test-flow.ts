@@ -1,6 +1,10 @@
 import { prisma } from '../prisma';
 import { QueueService } from '../queue';
 import { SessionService } from '../services/session';
+import { config } from '../config';
+
+// Force mock mode for integration tests
+(config as any).MOCK_ALL = true;
 
 async function runTestFlow() {
   console.log('🧪 Starting Automated Core Workflow Integration Test...');
@@ -125,6 +129,111 @@ async function runTestFlow() {
     console.log(` - Invoice ID: ${updatedLog?.invoiceId}`);
     console.log(` - Invoice PDF Link: ${updatedLog?.invoicePdf}`);
     console.log(` - Sync Status: ${updatedLog?.status} (Expected: INVOICED)`);
+
+    // 5. Simulating Edit Sales Order
+    console.log('\n✏️ [Step 5] Simulating edit command: "edit sales order SO-12345, set steel rod quantity to 8"');
+    const msgId5 = `test_msg_${Date.now() + 4}`;
+    await QueueService.processMessage({
+      from: testPhone,
+      messageId: msgId5,
+      timestamp: Math.floor(Date.now() / 1000),
+      type: 'text',
+      text: 'edit sales order SO-12345, set steel rod quantity to 8'
+    });
+
+    // Verify session state is AWAITING_CONFIRMATION
+    session = await SessionService.getSession(testPhone);
+    console.log('\n🔍 Verifying Session State after Step 5 (Edit Sales Order)...');
+    console.log(`Current Session State: ${session.state} (Expected: AWAITING_CONFIRMATION)`);
+    if (session.state !== 'AWAITING_CONFIRMATION') {
+      throw new Error(`Expected state AWAITING_CONFIRMATION, but got ${session.state}`);
+    }
+    
+    let editDraft = session.draft;
+    if (!editDraft) throw new Error('Edit draft is null!');
+    console.log(`Editing SO Number: ${editDraft.editingSalesOrderNumber} (Expected: SO-12345)`);
+    if (editDraft.editingSalesOrderNumber !== 'SO-12345') {
+      throw new Error(`Expected editingSalesOrderNumber SO-12345, got ${editDraft.editingSalesOrderNumber}`);
+    }
+
+    const editSteelRod = editDraft.items.find(i => i.name.toLowerCase().includes('steel'));
+    console.log(`Updated Steel Rod Qty in Edit Draft: ${editSteelRod?.quantity} (Expected: 8)`);
+    if (editSteelRod?.quantity !== 8) {
+      throw new Error(`Expected Steel Rod quantity to be 8, but got ${editSteelRod?.quantity}`);
+    }
+
+    // 6. Confirm Edit
+    console.log('\n✅ [Step 6] Simulating user click on "Confirm Edit" for Sales Order');
+    const msgId6 = `test_msg_${Date.now() + 5}`;
+    await QueueService.processMessage({
+      from: testPhone,
+      messageId: msgId6,
+      timestamp: Math.floor(Date.now() / 1000),
+      type: 'text',
+      text: 'btn_confirm'
+    });
+
+    // Verify session moved to AWAITING_INVOICE_DECISION
+    session = await SessionService.getSession(testPhone);
+    console.log('\n🔍 Verifying Session State after Step 6 (Confirm SO Edit)...');
+    console.log(`Current Session State: ${session.state} (Expected: AWAITING_INVOICE_DECISION)`);
+    if (session.state !== 'AWAITING_INVOICE_DECISION') {
+      throw new Error(`Expected state AWAITING_INVOICE_DECISION, but got ${session.state}`);
+    }
+
+    // Clear session for next test
+    await SessionService.clearSession(testPhone);
+
+    // 7. Simulating Edit Invoice
+    console.log('\n✏️ [Step 7] Simulating edit invoice command: "edit invoice INV-12345, set cement quantity to 20"');
+    const msgId7 = `test_msg_${Date.now() + 6}`;
+    await QueueService.processMessage({
+      from: testPhone,
+      messageId: msgId7,
+      timestamp: Math.floor(Date.now() / 1000),
+      type: 'text',
+      text: 'edit invoice INV-12345, set cement quantity to 20'
+    });
+
+    // Verify session
+    session = await SessionService.getSession(testPhone);
+    console.log('\n🔍 Verifying Session State after Step 7 (Edit Invoice)...');
+    console.log(`Current Session State: ${session.state} (Expected: AWAITING_CONFIRMATION)`);
+    if (session.state !== 'AWAITING_CONFIRMATION') {
+      throw new Error(`Expected state AWAITING_CONFIRMATION, but got ${session.state}`);
+    }
+
+    editDraft = session.draft;
+    if (!editDraft) throw new Error('Edit draft is null!');
+    console.log(`Editing Invoice Number: ${editDraft.editingInvoiceNumber} (Expected: INV-12345)`);
+    if (editDraft.editingInvoiceNumber !== 'INV-12345') {
+      throw new Error(`Expected editingInvoiceNumber INV-12345, got ${editDraft.editingInvoiceNumber}`);
+    }
+
+    const editCement = editDraft.items.find(i => i.name.toLowerCase().includes('cement'));
+    console.log(`Updated Cement Qty in Edit Draft: ${editCement?.quantity} (Expected: 20)`);
+    if (editCement?.quantity !== 20) {
+      throw new Error(`Expected Cement quantity to be 20, but got ${editCement?.quantity}`);
+    }
+
+    // 8. Confirm Invoice Edit
+    console.log('\n✅ [Step 8] Simulating user click on "Confirm Edit" for Invoice');
+    const msgId8 = `test_msg_${Date.now() + 7}`;
+    await QueueService.processMessage({
+      from: testPhone,
+      messageId: msgId8,
+      timestamp: Math.floor(Date.now() / 1000),
+      type: 'text',
+      text: 'btn_confirm'
+    });
+
+    // Verify session cleared
+    session = await SessionService.getSession(testPhone);
+    console.log('\n🔍 Verifying Session State after Step 8 (Confirm Invoice Edit)...');
+    console.log(`Current Session State: ${session.state} (Expected: IDLE)`);
+    if (session.state !== 'IDLE') {
+      throw new Error(`Expected state IDLE, but got ${session.state}`);
+    }
 
     console.log('\n🎉 ALL CORE PIPELINE TESTS COMPLETED SUCCESSFULLY! 🎉');
   } catch (error) {

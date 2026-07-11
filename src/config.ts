@@ -22,6 +22,9 @@ const configSchema = z.object({
   WHATSAPP_PHONE_NUMBER_ID: z.string().default('mock-phone-id'),
   WHATSAPP_VERIFY_TOKEN: z.string().default('mock-verify-token'),
   PUBLIC_URL: z.string().optional(),
+  DASHBOARD_USERNAME: z.string().default('admin'),
+  DASHBOARD_PASSWORD: z.string().default('adminpassword'),
+  SESSION_SECRET: z.string().default('zoho_flow_session_secret_key_123!'),
 });
 
 // Run validation

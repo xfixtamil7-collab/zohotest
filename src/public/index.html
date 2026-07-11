@@ -12,21 +12,41 @@
 <body>
   <div class="glow-bg"></div>
   
-  <header>
+  <header style="display: flex; justify-content: space-between; align-items: center;">
     <div class="logo">
       <span class="pulse-dot"></span>
       <h1>Zoho Voice <span>Automation Console</span></h1>
     </div>
-    <div class="status-indicators">
+    <div class="status-indicators" style="display: flex; align-items: center; gap: 0.75rem;">
       <div class="badge success" id="status-mock">Mock Mode Active</div>
+      
+      <!-- Zoho Account Dropdown Select -->
+      <div class="header-select-container">
+        <span class="header-select-label">Active:</span>
+        <select id="header-active-account-select" onchange="handleHeaderAccountChange(this.value)">
+          <option value="none">🔌 Disconnected</option>
+        </select>
+      </div>
+      
+      <button class="btn btn-accent btn-sm" onclick="openManageAccountsModal()" style="border-radius: 8px; padding: 0.35rem 0.65rem !important;">⚙️ Manage</button>
       <div class="badge info" id="status-db">SQLite Database</div>
+      <form action="/logout" method="POST" style="margin: 0; display: inline-flex;">
+        <button type="submit" class="btn btn-danger btn-sm" style="border-radius: 8px; padding: 0.35rem 0.65rem !important;">🚪 Logout</button>
+      </form>
     </div>
   </header>
+
+  <!-- Mobile Tab Navigation Bar (Visible only on mobile/tablet) -->
+  <div class="mobile-tabs">
+    <button class="tab-btn active" onclick="switchMobileTab('simulator')">🤖 Simulator</button>
+    <button class="tab-btn" onclick="switchMobileTab('inventory')">📦 Inventory</button>
+    <button class="tab-btn" onclick="switchMobileTab('chat')">💬 WhatsApp Chat</button>
+  </div>
 
   <main class="grid-container">
     
     <!-- LEFT PANEL: Configuration & Simulator -->
-    <section class="panel glass simulator-panel">
+    <section class="panel glass simulator-panel active-tab-panel" id="panel-simulator">
       <h2>🤖 Pipeline Simulation Console</h2>
       <p class="section-desc">Simulate incoming WhatsApp messages (voice transcriptions or button actions) to trigger the automated order pipeline.</p>
       
@@ -41,12 +61,15 @@
           <textarea id="sim-text" placeholder="Type what the user said (in English, Tamil or Tanglish) or select a script below..." rows="3"></textarea>
         </div>
 
-        <div class="voice-input-row">
-          <button type="button" id="record-btn" class="btn btn-secondary">
-            <span class="mic-icon">🎤</span> Simulate Voice Note Upload
+        <div class="voice-input-row" style="flex-wrap: wrap; gap: 0.5rem;">
+          <button type="button" id="record-btn" class="btn btn-secondary" style="flex: 1; min-width: 160px; padding: 0.6rem 1rem;">
+            <span class="mic-icon">📁</span> Simulate Voice Note Upload
+          </button>
+          <button type="button" id="live-record-btn" class="btn btn-accent" style="flex: 1; min-width: 140px; padding: 0.6rem 1rem;">
+            <span class="mic-icon">🎤</span> Live Record
           </button>
           <input type="file" id="audio-file" accept="audio/*" style="display: none;">
-          <span id="file-name-label" class="file-label">No file chosen</span>
+          <span id="file-name-label" class="file-label" style="width: 100%; margin-top: 0.25rem;">No file chosen</span>
         </div>
 
         <div class="button-group">
@@ -69,6 +92,18 @@
           </button>
           <button class="preset-btn" onclick="applyPreset('btn_invoice_create')">
             📄 <strong>Click Button:</strong> "Create Invoice"
+          </button>
+          <button class="preset-btn" style="border: 1px dashed var(--accent-color);" onclick="applyPreset('edit sales order SO-12345, set steel rod quantity to 8')">
+            ✏️ <strong>Edit SO-12345 (Change Steel):</strong> "edit sales order SO-12345, set steel rod quantity to 8"
+          </button>
+          <button class="preset-btn" style="border: 1px dashed var(--accent-color);" onclick="applyPreset('edit invoice INV-12345, set cement quantity to 20')">
+            ✏️ <strong>Edit INV-12345 (Change Cement):</strong> "edit invoice INV-12345, set cement quantity to 20"
+          </button>
+          <button class="preset-btn preset-btn-euro" onclick="applyPreset('Rice bag 25Kg per bag price range 30€-40€ qty your choice Total €35961.34 sriya varanum')">
+            🌾 <strong>Rice Bag (€, Qty Inferred):</strong> Price range 30€–40€, Total €35961.34
+          </button>
+          <button class="preset-btn preset-btn-veera" onclick="applyPreset('Veera Ponni Rice 20kg quantity-a your choice set pannunga oru bag price €30–€40 range-kulla vara maadhiri irukkanum Total Correct Amount €37900')">
+            🍋 <strong>Veera Ponni Rice (€37,900 Exact):</strong> 20Kg, range €30–€40, Total exactly €37,900
           </button>
         </div>
       </div>
@@ -109,7 +144,7 @@
     </section>
 
     <!-- CENTER PANEL: Active Sessions & Inventory Status -->
-    <section class="panel glass data-panel">
+    <section class="panel glass data-panel" id="panel-inventory">
       
       <!-- Active Sessions -->
       <div class="data-block">
@@ -119,9 +154,33 @@
         </div>
       </div>
 
+      <!-- Synced Orders & Invoices Logs -->
+      <div class="data-block">
+        <h2>📜 Bot Sync Activity (Sales Orders & Invoices)</h2>
+        <div class="table-container" style="max-height: 250px; overflow-y: auto;">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Sales Order</th>
+                <th>Invoice</th>
+                <th>Customer</th>
+                <th>Total</th>
+                <th>Status</th>
+                <th>Updated At</th>
+              </tr>
+            </thead>
+            <tbody id="synced-logs-body">
+              <tr><td colspan="6" class="loading">Loading logs...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+
+
       <!-- Zoho Inventory Database Browser -->
       <div class="data-block">
-        <h2>📦 Mock Zoho Inventory Items</h2>
+        <h2 id="inventory-items-title">📦 Mock Zoho Inventory Items</h2>
         <div class="search-bar-container">
           <input type="text" id="item-search-input" placeholder="🔍 Search products in inventory..." onkeyup="filterItems()">
         </div>
@@ -146,7 +205,7 @@
     </section>
 
     <!-- RIGHT PANEL: WhatsApp Device Frame Mockup -->
-    <section class="panel phone-panel">
+    <section class="panel phone-panel" id="panel-chat">
       <div class="phone-frame">
         <div class="phone-header">
           <div class="phone-speaker"></div>
@@ -174,7 +233,12 @@
 
       <!-- Mock Customer Contacts -->
       <div class="data-block" style="width: 100%; border-top: 1px solid var(--border-color); padding-top: 1.5rem; margin-top: 0.5rem;">
-        <h2>👥 Mock Zoho Customer Directory</h2>
+        <h2 id="inventory-customers-title">👥 Mock Zoho Customer Directory</h2>
+        <div class="add-customer-btn-row">
+          <button class="btn-add-customer" id="open-create-customer-btn" onclick="openCreateCustomerModal()">
+            ➕ Add Customer
+          </button>
+        </div>
         <div class="search-bar-container">
           <input type="text" id="customer-search-input" placeholder="🔍 Search customers..." onkeyup="filterCustomers()">
         </div>
@@ -201,6 +265,198 @@
     <p>Google Gemini Advanced Developer Environment. Built for the Zoho Voice Automation Suite.</p>
   </footer>
 
+  <!-- ============================================================
+       MANAGE ZOHO ACCOUNTS MODAL
+       ============================================================ -->
+  <div class="modal-overlay" id="manage-accounts-modal">
+    <div class="modal-card" style="max-width: 700px; width: 90%;">
+      <div class="modal-header">
+        <h2>🔑 Connected Zoho Accounts</h2>
+        <button class="modal-close-btn" onclick="closeManageAccountsModal()" title="Close">✕</button>
+      </div>
+      
+      <div style="display: flex; justify-content: flex-end; margin-bottom: 1rem;">
+        <button class="btn btn-accent btn-sm" onclick="openAddAccountModal()">➕ Connect New Account</button>
+      </div>
+
+      <div class="table-container" style="max-height: 350px; overflow-y: auto;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Account Name</th>
+              <th>Org ID</th>
+              <th>Region</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="zoho-accounts-table-body">
+            <tr><td colspan="5" class="loading">Loading accounts...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      
+      <div class="modal-footer" style="margin-top: 1.5rem;">
+        <button type="button" class="btn btn-secondary" style="min-width: 100px;" onclick="closeManageAccountsModal()">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       ADD ZOHO ACCOUNT MODAL
+       ============================================================ -->
+  <div class="modal-overlay" id="add-account-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>🔌 Connect Zoho Inventory Account</h2>
+        <button class="modal-close-btn" onclick="closeAddAccountModal()" title="Close">✕</button>
+      </div>
+
+      <form class="modal-form" id="add-account-form" onsubmit="submitAddAccount(event)">
+        <div class="form-group">
+          <label for="za-name">🏷️ Account Name / Identifier *</label>
+          <input type="text" id="za-name" placeholder="e.g. Sriya Exports EU Account" required>
+        </div>
+
+        <div class="form-row-2" style="margin-top: 1rem;">
+          <div class="form-group">
+            <label for="za-region">🌐 Region / Domain *</label>
+            <select id="za-region" style="background-color: rgba(255, 255, 255, 0.04); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.75rem; color: var(--text-primary); font-family: inherit; font-size: 0.9rem;" required>
+              <option value="in" style="background-color: var(--bg-secondary); color: var(--text-primary);">India (zoho.in)</option>
+              <option value="com" style="background-color: var(--bg-secondary); color: var(--text-primary);">US / Global (zoho.com)</option>
+              <option value="eu" style="background-color: var(--bg-secondary); color: var(--text-primary);">Europe (zoho.eu)</option>
+              <option value="com.au" style="background-color: var(--bg-secondary); color: var(--text-primary);">Australia (zoho.com.au)</option>
+              <option value="com.cn" style="background-color: var(--bg-secondary); color: var(--text-primary);">China (zoho.com.cn)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="za-org-id">🆔 Organization ID *</label>
+            <input type="text" id="za-org-id" placeholder="e.g. 922406403" required>
+          </div>
+        </div>
+
+        <div class="form-group" style="margin-top: 1rem;">
+          <label for="za-client-id">🔑 Client ID <span style="color: #fda29b; font-size: 0.75rem; font-weight: normal; margin-left: 0.25rem;">(Self Client data)</span> *</label>
+          <input type="text" id="za-client-id" placeholder="1000.XXXXXX..." required>
+        </div>
+
+        <div class="form-group" style="margin-top: 1rem;">
+          <label for="za-client-secret">🔒 Client Secret <span style="color: #fda29b; font-size: 0.75rem; font-weight: normal; margin-left: 0.25rem;">(Self Client data)</span> *</label>
+          <input type="password" id="za-client-secret" style="background-color: rgba(255, 255, 255, 0.04); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.75rem; color: var(--text-primary); font-family: inherit; font-size: 0.9rem;" placeholder="••••••••••••••••" required>
+        </div>
+
+        <div class="form-group" style="margin-top: 1rem;">
+          <label for="za-refresh-token">🔄 Refresh Token or Auth Code <span style="color: #fda29b; font-size: 0.75rem; font-weight: normal; margin-left: 0.25rem;">(Self Client data)</span> *</label>
+          <textarea id="za-refresh-token" placeholder="Paste Refresh Token or generated temporary Authorization Code" rows="2" style="background-color: rgba(255, 255, 255, 0.04); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.75rem; color: var(--text-primary); font-family: inherit; font-size: 0.9rem;" required></textarea>
+        </div>
+        <div style="margin-top: 0.75rem; padding: 0.75rem; border: 1px dashed rgba(240, 68, 56, 0.45); border-radius: 8px; background-color: rgba(240, 68, 56, 0.05); font-size: 0.75rem; line-height: 1.5; color: #fda29b;">
+          <strong>💡 Note to Generate Authorization Code:</strong><br>
+          • <strong>Step 1:</strong> Go to <a href="https://api-console.zoho.com" target="_blank" style="color: #ffb8b4; text-decoration: underline; font-weight: 600;">api-console.zoho.com</a> (or .in depending on region)<br>
+          • <strong>Step 2:</strong> Create Client Type: <strong>Server-based Applications</strong><br>
+          • <strong>Step 3:</strong> Click <strong>Self Client</strong> → Scope: <code>ZohoInventory.FullAccess.all</code>
+        </div>
+
+        <div class="modal-footer" style="margin-top: 1.5rem;">
+          <button type="button" class="btn btn-secondary" style="min-width:100px" onclick="closeAddAccountModal()">Cancel</button>
+          <button type="submit" class="btn-create-customer" id="submit-add-account-btn">🔌 Connect Account</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ============================================================
+       CREATE CUSTOMER MODAL
+       ============================================================ -->
+  <div class="modal-overlay" id="create-customer-modal">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2>➕ Create New Zoho Customer</h2>
+        <button class="modal-close-btn" onclick="closeCreateCustomerModal()" title="Close">✕</button>
+      </div>
+
+      <!-- France Auto-Lookup Section -->
+      <div class="france-search-section">
+        <div class="france-search-label">
+          <span class="france-flag">🇫🇷</span>
+          France Company Auto-Lookup (SIRET / SIREN / Company Name)
+        </div>
+        <div class="france-search-row">
+          <input type="text" id="france-search-input" placeholder="Ex: 35282431500046 or Carrefour..." autocomplete="off"
+             onkeydown="if(event.key==='Enter'){event.preventDefault();doFranceLookup();}">
+          <button class="btn-france-lookup" id="france-lookup-btn" onclick="doFranceLookup()">🔍 Lookup</button>
+        </div>
+        <div class="lookup-status" id="lookup-status">Enter a SIRET, SIREN, or company name above to auto-fill details.</div>
+        <div class="france-results-list" id="france-results-list"></div>
+        <div class="auto-filled-chips" id="auto-filled-chips"></div>
+      </div>
+
+      <!-- Customer Form -->
+      <form class="modal-form" id="create-customer-form" onsubmit="submitCreateCustomer(event)">
+
+        <div class="form-group">
+          <label for="cc-company-name">🏢 Company Name *</label>
+          <input type="text" id="cc-company-name" placeholder="ACME France SARL" required>
+        </div>
+
+        <div class="form-row-2" style="margin-top: 1rem;">
+          <div class="form-group">
+            <label for="cc-first-name">👤 First Name *</label>
+            <input type="text" id="cc-first-name" placeholder="Laila" required>
+          </div>
+          <div class="form-group">
+            <label for="cc-last-name">👤 Last Name *</label>
+            <input type="text" id="cc-last-name" placeholder="MOHANNA" required>
+          </div>
+        </div>
+
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="cc-email">📧 Email</label>
+            <input type="email" id="cc-email" placeholder="contact@company.fr">
+          </div>
+          <div class="form-group">
+            <label for="cc-phone">📞 Phone</label>
+            <input type="text" id="cc-phone" placeholder="+33 1 23 45 67 89">
+          </div>
+        </div>
+
+        <div class="modal-divider"></div>
+
+        <div class="form-group">
+          <label for="cc-address">📍 Street Address</label>
+          <input type="text" id="cc-address" placeholder="12 Rue de Rivoli" readonly>
+        </div>
+
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="cc-city">🏙️ City</label>
+            <input type="text" id="cc-city" placeholder="Paris" readonly>
+          </div>
+          <div class="form-group">
+            <label for="cc-postal">📮 Postal Code</label>
+            <input type="text" id="cc-postal" placeholder="75001" readonly>
+          </div>
+        </div>
+
+        <div class="form-row-2">
+          <div class="form-group">
+            <label for="cc-vat">🔢 VAT Number (TVA)</label>
+            <input type="text" id="cc-vat" placeholder="FR12345678901" readonly>
+          </div>
+          <div class="form-group">
+            <label for="cc-siret">🪪 SIRET</label>
+            <input type="text" id="cc-siret" placeholder="35282431500046" readonly>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" style="min-width:100px" onclick="closeCreateCustomerModal()">Cancel</button>
+          <button type="submit" class="btn-create-customer" id="submit-create-customer-btn">✅ Create in Zoho</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <script>
     // Config properties
     const API_BASE = `${window.location.protocol}//${window.location.hostname}${window.location.port ? `:${window.location.port}` : ''}`;
@@ -212,6 +468,7 @@
     }
 
     let allInventoryItems = [];
+    let activeCurrencySymbol = '₹';
 
     function renderInventoryItems(items) {
       const itemBody = document.getElementById('inventory-items-body');
@@ -223,7 +480,7 @@
         <tr>
           <td><strong>${it.name}</strong></td>
           <td><code>${it.sku || 'N/A'}</code></td>
-          <td>₹${it.rate}</td>
+          <td>${activeCurrencySymbol}${it.rate}</td>
           <td><span class="stock-badge ${it.stock_on_hand <= 5 ? 'low' : 'ok'}">${it.stock_on_hand} ${it.unit || 'units'}</span></td>
           <td>${it.tax_percentage || 0}%</td>
         </tr>
@@ -277,12 +534,34 @@
     async function loadZohoMocks() {
       try {
         const itemRes = await fetch(`${API_BASE}/api/mocks/items`);
-        allInventoryItems = await itemRes.json();
-        renderInventoryItems(allInventoryItems);
+        if (itemRes.ok) {
+          allInventoryItems = await itemRes.json();
+          renderInventoryItems(allInventoryItems);
+        } else {
+          allInventoryItems = [];
+          document.getElementById('inventory-items-body').innerHTML = `
+            <tr>
+              <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 1.5rem 0;">
+                No active Zoho account connected. Please connect an account to show data.
+              </td>
+            </tr>
+          `;
+        }
 
         const custRes = await fetch(`${API_BASE}/api/mocks/customers`);
-        allInventoryCustomers = await custRes.json();
-        renderInventoryCustomers(allInventoryCustomers);
+        if (custRes.ok) {
+          allInventoryCustomers = await custRes.json();
+          renderInventoryCustomers(allInventoryCustomers);
+        } else {
+          allInventoryCustomers = [];
+          document.getElementById('inventory-customers-body').innerHTML = `
+            <tr>
+              <td colspan="3" style="text-align: center; color: var(--text-muted); padding: 1.5rem 0;">
+                No active Zoho account connected. Please connect an account to show customers.
+              </td>
+            </tr>
+          `;
+        }
       } catch (err) {
         console.error('Error fetching mock database:', err);
       }
@@ -302,7 +581,9 @@
         }
 
         const draft = session.draft;
-        const warnings = draft.warnings && draft.warnings.length > 0 
+        const cur = draft.currency || activeCurrencySymbol;
+        const curCode = draft.currencyCode || '';
+        const warnings = draft.warnings && draft.warnings.length > 0
           ? `<div class="session-warnings">⚠️ <strong>Warnings:</strong><ul>${draft.warnings.map(w=>`<li>${w}</li>`).join('')}</ul></div>`
           : '';
 
@@ -310,28 +591,42 @@
           <div class="session-details">
             <div class="session-meta">
               <span><strong>State:</strong> <span class="badge info">${session.state}</span></span>
-              <span><strong>Customer:</strong> ${draft.zohoCustomerName || draft.spokenCustomerName}</span>
+              <span><strong>Customer:</strong> ${draft.zohoCustomerName || draft.spokenCustomerName || '<em>Not specified</em>'}</span>
+              ${curCode ? `<span><strong>Currency:</strong> <span class="badge currency-badge">${cur} ${curCode}</span></span>` : ''}
             </div>
-            
+
             <div class="session-items">
               <h4>Items in Draft</h4>
               <ul>
-                ${draft.items.map(it => `
+                ${draft.items.map(it => {
+                  const matchClass = it.matchedStatus ? it.matchedStatus.toLowerCase() : '';
+                  const rateDisplay = (it.priceRangeMin !== undefined && it.priceRangeMax !== undefined)
+                    ? `<span class="price-range-badge">${cur}${it.rate || 0}</span> <em>(range: ${cur}${it.priceRangeMin}–${cur}${it.priceRangeMax})</em>`
+                    : `${cur}${it.rate || 0}`;
+                  const inferredBadge = it.inferredQuantity
+                    ? `<span class="inferred-badge">⚡ Exact Qty Match</span>`
+                    : '';
+                  const targetLine = it.targetTotal
+                    ? `<div class="target-total-line">🎯 Target Total: <strong>${cur}${Number(it.targetTotal).toFixed(2)}</strong></div>`
+                    : '';
+                  return `
                   <li>
-                    <strong>${it.zohoItemName || it.name}</strong> 
-                    x ${it.quantity} @ ₹${it.rate || 0} 
-                    <span class="session-item-badge ${it.matchedStatus.toLowerCase()}">${it.matchedStatus}</span>
-                  </li>
-                `).join('')}
+                    <strong>${it.zohoItemName || it.name}</strong>
+                    x ${it.quantity} ${it.unit || 'units'} @ ${rateDisplay}
+                    ${inferredBadge}
+                    <span class="session-item-badge ${matchClass}">${it.matchedStatus || 'PENDING'}</span>
+                    ${targetLine}
+                  </li>`;
+                }).join('')}
               </ul>
             </div>
 
             <div class="session-totals">
-              <div>Subtotal: <span>₹${(draft.totalAmount || 0).toFixed(2)}</span></div>
-              <div>Tax Amount: <span>₹${(draft.taxAmount || 0).toFixed(2)}</span></div>
-              <div class="grand-total">Total: <span>₹${(draft.grandTotal || 0).toFixed(2)}</span></div>
+              <div>Subtotal: <span>${cur}${(draft.totalAmount || 0).toFixed(2)}</span></div>
+              <div>Tax Amount: <span>${cur}${(draft.taxAmount || 0).toFixed(2)}</span></div>
+              <div class="grand-total">Total: <span>${cur}${(draft.grandTotal || 0).toFixed(2)}</span></div>
             </div>
-            
+
             ${warnings}
           </div>
         `;
@@ -510,7 +805,105 @@
       }
     });
 
+    // Live recording logic
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let isRecording = false;
+    let recordStream = null;
 
+    const liveRecordBtn = document.getElementById('live-record-btn');
+
+    liveRecordBtn.addEventListener('click', async () => {
+      if (!isRecording) {
+        try {
+          recordStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          audioChunks = [];
+          
+          let options = {};
+          if (typeof MediaRecorder !== 'undefined') {
+            if (MediaRecorder.isTypeSupported('audio/webm')) {
+              options = { mimeType: 'audio/webm' };
+            } else if (MediaRecorder.isTypeSupported('audio/ogg')) {
+              options = { mimeType: 'audio/ogg' };
+            } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
+              options = { mimeType: 'audio/mp4' };
+            }
+          }
+          
+          mediaRecorder = new MediaRecorder(recordStream, options);
+          
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+              audioChunks.push(event.data);
+            }
+          };
+
+          mediaRecorder.onstop = async () => {
+            const audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+            
+            // Show transcription status
+            liveRecordBtn.innerHTML = '<span class="pulse-dot" style="width:8px; height:8px; background-color:#ff9800; box-shadow:0 0 5px #ff9800;"></span> Transcribing...';
+            liveRecordBtn.disabled = true;
+            
+            try {
+              const formData = new FormData();
+              let extension = 'webm';
+              if (mediaRecorder.mimeType && mediaRecorder.mimeType.includes('ogg')) extension = 'ogg';
+              else if (mediaRecorder.mimeType && mediaRecorder.mimeType.includes('mp4')) extension = 'mp4';
+              else if (mediaRecorder.mimeType && mediaRecorder.mimeType.includes('wav')) extension = 'wav';
+              
+              formData.append('audio', audioBlob, `recording.${extension}`);
+              
+              const res = await fetch(`${API_BASE}/api/transcribe-tanglish`, {
+                method: 'POST',
+                body: formData
+              });
+              
+              const data = await res.json();
+              if (res.ok && data.tanglish) {
+                const simText = document.getElementById('sim-text');
+                simText.value = data.tanglish;
+                simText.focus();
+                
+                // Highlight textarea visually
+                simText.style.borderColor = 'var(--success)';
+                simText.style.boxShadow = '0 0 10px rgba(18, 183, 106, 0.4)';
+                setTimeout(() => {
+                  simText.style.borderColor = '';
+                  simText.style.boxShadow = '';
+                }, 2500);
+              } else {
+                alert('Transcription failed: ' + (data.error || 'Unknown error'));
+              }
+            } catch (err) {
+              console.error(err);
+              alert('Error uploading or transcribing audio: ' + err.message);
+            } finally {
+              liveRecordBtn.disabled = false;
+              liveRecordBtn.className = 'btn btn-accent';
+              liveRecordBtn.innerHTML = '<span class="mic-icon">🎤</span> Live Record';
+            }
+
+            if (recordStream) {
+              recordStream.getTracks().forEach(track => track.stop());
+            }
+          };
+
+          mediaRecorder.start();
+          isRecording = true;
+          liveRecordBtn.className = 'btn btn-accent recording';
+          liveRecordBtn.innerHTML = '<span class="mic-icon">🛑</span> Stop Recording';
+        } catch (err) {
+          console.error('Microphone access denied or error:', err);
+          alert('Could not access microphone. Please check permissions.');
+        }
+      } else {
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+          mediaRecorder.stop();
+        }
+        isRecording = false;
+      }
+    });
 
     document.getElementById('clear-phone-btn').addEventListener('click', async () => {
       try {
@@ -519,8 +912,103 @@
       } catch (e) {}
     });
 
+    async function loadConfig() {
+      try {
+        const res = await fetch(`${API_BASE}/api/config`);
+        const data = await res.json();
+        
+        activeCurrencySymbol = data.currencySymbol || '₹';
+        if (allInventoryItems && allInventoryItems.length > 0) {
+          renderInventoryItems(allInventoryItems);
+        }
+
+        const statusMock = document.getElementById('status-mock');
+        const itemsTitle = document.getElementById('inventory-items-title');
+        const custTitle = document.getElementById('inventory-customers-title');
+        
+        if (data.accountName === 'None') {
+          statusMock.innerText = `🔌 Disconnected`;
+          statusMock.className = 'badge error';
+          if (itemsTitle) itemsTitle.innerText = `📦 Items (Disconnected)`;
+          if (custTitle) custTitle.innerText = `👥 Customers (Disconnected)`;
+        } else if (data.mockMode) {
+          statusMock.innerText = `Mock Active (${data.accountName})`;
+          statusMock.className = 'badge success';
+          if (itemsTitle) itemsTitle.innerText = `📦 Mock Items (${data.accountName})`;
+          if (custTitle) custTitle.innerText = `👥 Mock Customers (${data.accountName})`;
+        } else {
+          statusMock.innerText = `Zoho (${data.region.toUpperCase()}): ${data.accountName}`;
+          statusMock.className = 'badge info';
+          if (itemsTitle) itemsTitle.innerText = `📦 Items (${data.accountName})`;
+          if (custTitle) custTitle.innerText = `👥 Customers (${data.accountName})`;
+        }
+      } catch (err) {
+        console.error('Error loading config:', err);
+      }
+    }
+
+    async function loadOrderLogs() {
+      try {
+        const res = await fetch(`${API_BASE}/api/orders/logs`);
+        const logs = await res.json();
+        renderOrderLogs(logs);
+      } catch (err) {
+        console.error('Error loading order logs:', err);
+      }
+    }
+
+    function renderOrderLogs(logs) {
+      const tbody = document.getElementById('synced-logs-body');
+      if (!tbody) return;
+
+      if (logs.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="empty-state" style="text-align: center; color: var(--text-muted); padding: 1.5rem 0;">No synced orders or invoices found.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = logs.map(log => {
+        const dateStr = new Date(log.updatedAt).toLocaleString();
+        
+        let soDisplay = '-';
+        if (log.salesOrderNumber) {
+          soDisplay = log.salesOrderId 
+            ? `<a href="/api/download/salesorder/${log.salesOrderId}" target="_blank" class="document-link" style="color: var(--accent-color); text-decoration: none;">📄 ${log.salesOrderNumber}</a>`
+            : `📄 ${log.salesOrderNumber}`;
+        }
+
+        let invDisplay = '-';
+        if (log.invoiceNumber) {
+          invDisplay = log.invoiceId 
+            ? `<a href="/api/download/invoice/${log.invoiceId}" target="_blank" class="document-link" style="color: var(--accent-color); text-decoration: none;">🧾 ${log.invoiceNumber}</a>`
+            : `🧾 ${log.invoiceNumber}`;
+        }
+
+        let statusClass = 'info';
+        if (log.status.includes('CREATED')) statusClass = 'success';
+        if (log.status.includes('UPDATED')) statusClass = 'warning';
+        if (log.status.includes('INVOICED')) statusClass = 'accent';
+
+        const currencySymbol = activeCurrencySymbol || '₹';
+
+        return `
+          <tr>
+            <td><strong>${soDisplay}</strong></td>
+            <td><strong>${invDisplay}</strong></td>
+            <td>${log.customerName}</td>
+            <td>${log.totalAmount ? currencySymbol + log.totalAmount.toFixed(2) : currencySymbol + '0.00'}</td>
+            <td><span class="badge ${statusClass}">${log.status.replace(/_/g, ' ')}</span></td>
+            <td style="font-size: 0.8rem; color: var(--text-muted);">${dateStr}</td>
+          </tr>
+        `;
+      }).join('');
+    }
+
     // Initial loads & polling loops
+    loadConfig();
+    loadZohoAccounts();
     loadZohoMocks();
+    loadOrderLogs();
+
     refreshActiveSession();
     refreshWhatsAppChat();
 
@@ -528,12 +1016,543 @@
     setInterval(() => {
       refreshActiveSession();
       refreshWhatsAppChat();
+      loadOrderLogs();
     }, 3000);
 
     // If phone input changes, update immediately
     document.getElementById('sim-phone').addEventListener('change', () => {
       refreshActiveSession();
     });
+
+    // ============================================================
+    // CUSTOM ALERT LOGIC
+    // ============================================================
+    function showCustomAlert(title, message, type = 'success') {
+      // Create overlay
+      const overlay = document.createElement('div');
+      overlay.className = 'custom-alert-overlay';
+      
+      const icon = type === 'success' ? '✅' : '❌';
+      const headerClass = type === 'success' ? 'success' : 'error';
+      
+      overlay.innerHTML = `
+        <div class="custom-alert-card ${headerClass}">
+          <div class="custom-alert-icon">${icon}</div>
+          <div class="custom-alert-title">${title}</div>
+          <div class="custom-alert-message">${message}</div>
+          <button class="custom-alert-btn">OK</button>
+        </div>
+      `;
+      
+      // Close listener
+      overlay.querySelector('.custom-alert-btn').addEventListener('click', () => {
+        overlay.classList.remove('open');
+        setTimeout(() => overlay.remove(), 250);
+      });
+      
+      // Close on clicking backdrop
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) {
+          overlay.classList.remove('open');
+          setTimeout(() => overlay.remove(), 250);
+        }
+      });
+      
+      document.body.appendChild(overlay);
+      
+      // Trigger animations
+      setTimeout(() => {
+        overlay.classList.add('open');
+      }, 10);
+    }
+
+    // ============================================================
+    // CUSTOM CONFIRM LOGIC
+    // ============================================================
+    function showCustomConfirm(title, message, onConfirm) {
+      // Create overlay
+      const overlay = document.createElement('div');
+      overlay.className = 'custom-alert-overlay';
+      
+      overlay.innerHTML = `
+        <div class="custom-alert-card error" style="border-color: rgba(240, 68, 56, 0.45); max-width: 380px;">
+          <div class="custom-alert-icon">⚠️</div>
+          <div class="custom-alert-title">${title}</div>
+          <div class="custom-alert-message">${message}</div>
+          <div style="display: flex; gap: 0.75rem; margin-top: 1.5rem; justify-content: center;">
+            <button class="btn btn-secondary custom-confirm-cancel-btn" style="flex: 1; padding: 0.55rem 1rem; border-radius: 8px;">Cancel</button>
+            <button class="btn btn-danger custom-confirm-ok-btn" style="flex: 1; padding: 0.55rem 1rem; border-radius: 8px;">Delete</button>
+          </div>
+        </div>
+      `;
+      
+      const closeAlert = () => {
+        overlay.classList.remove('open');
+        setTimeout(() => overlay.remove(), 250);
+      };
+
+      // Cancel listener
+      overlay.querySelector('.custom-confirm-cancel-btn').addEventListener('click', closeAlert);
+      
+      // Confirm listener
+      overlay.querySelector('.custom-confirm-ok-btn').addEventListener('click', () => {
+        closeAlert();
+        onConfirm();
+      });
+      
+      // Close on clicking backdrop
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) closeAlert();
+      });
+      
+      document.body.appendChild(overlay);
+      
+      // Trigger animations
+      setTimeout(() => {
+        overlay.classList.add('open');
+      }, 10);
+    }
+
+    // ============================================================
+    // CREATE CUSTOMER MODAL LOGIC
+    // ============================================================
+
+    let selectedFranceCompany = null;
+
+    function openCreateCustomerModal() {
+      resetCreateCustomerModal();
+      document.getElementById('create-customer-modal').classList.add('open');
+    }
+
+    function closeCreateCustomerModal() {
+      document.getElementById('create-customer-modal').classList.remove('open');
+    }
+
+    // Close when clicking backdrop
+    document.getElementById('create-customer-modal').addEventListener('click', (e) => {
+      if (e.target === document.getElementById('create-customer-modal')) closeCreateCustomerModal();
+    });
+    document.getElementById('add-account-modal').addEventListener('click', (e) => {
+      if (e.target === document.getElementById('add-account-modal')) closeAddAccountModal();
+    });
+    document.getElementById('manage-accounts-modal').addEventListener('click', (e) => {
+      if (e.target === document.getElementById('manage-accounts-modal')) closeManageAccountsModal();
+    });
+
+    function openManageAccountsModal() {
+      document.getElementById('manage-accounts-modal').classList.add('open');
+    }
+
+    function closeManageAccountsModal() {
+      document.getElementById('manage-accounts-modal').classList.remove('open');
+    }
+
+    function resetCreateCustomerModal() {
+      selectedFranceCompany = null;
+      document.getElementById('france-search-input').value = '';
+      document.getElementById('lookup-status').textContent = 'Enter a SIRET, SIREN, or company name above to auto-fill details.';
+      document.getElementById('lookup-status').className = 'lookup-status';
+      document.getElementById('france-results-list').innerHTML = '';
+      document.getElementById('auto-filled-chips').innerHTML = '';
+      ['cc-company-name','cc-first-name','cc-last-name','cc-email','cc-phone',
+       'cc-address','cc-city','cc-postal','cc-vat','cc-siret'].forEach(id => {
+        document.getElementById(id).value = '';
+      });
+      // Reset readonly fields
+      ['cc-address','cc-city','cc-postal','cc-vat','cc-siret'].forEach(id => {
+        document.getElementById(id).readOnly = true;
+      });
+    }
+
+    async function doFranceLookup() {
+      const q = document.getElementById('france-search-input').value.trim();
+      if (!q || q.length < 3) {
+        setLookupStatus('Please enter at least 3 characters.', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('france-lookup-btn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spin">⏳</span> Searching...';
+      setLookupStatus('Querying INSEE Sirene API (French Business Registry)...', '');
+      document.getElementById('france-results-list').innerHTML = '';
+      document.getElementById('auto-filled-chips').innerHTML = '';
+      selectedFranceCompany = null;
+
+      try {
+        const res = await fetch(`${API_BASE}/api/france/lookup?q=${encodeURIComponent(q)}`);
+        const data = await res.json();
+
+        if (!res.ok) {
+          setLookupStatus('⚠️ ' + (data.error || 'Lookup failed.'), 'error');
+          return;
+        }
+
+        if (!data.found || data.results.length === 0) {
+          setLookupStatus('❌ No company found. Try a different SIRET, SIREN, or name.', 'error');
+          return;
+        }
+
+        renderFranceResults(data.results);
+        setLookupStatus(`✅ Found ${data.results.length} result(s). Click to select.`, 'success');
+
+        // Auto-select if only one result
+        if (data.results.length === 1) selectFranceCompany(data.results[0]);
+
+      } catch (err) {
+        setLookupStatus('❌ Network error: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '🔍 Lookup';
+      }
+    }
+
+    function setLookupStatus(msg, type) {
+      const el = document.getElementById('lookup-status');
+      el.textContent = msg;
+      el.className = 'lookup-status' + (type ? ' ' + type : '');
+    }
+
+    function renderFranceResults(results) {
+      const list = document.getElementById('france-results-list');
+      list.innerHTML = results.map((r, i) => `
+        <div class="france-result-item" id="france-result-${i}" onclick="selectFranceCompany(${JSON.stringify(r).replace(/"/g, '&quot;')}, ${i})">
+          <div class="france-result-name">${r.companyName || 'Unknown'}</div>
+          <div class="france-result-meta">
+            ${r.siret ? 'SIRET: ' + r.siret : r.siren ? 'SIREN: ' + r.siren : ''}
+            ${r.address.city ? ' &bull; ' + r.address.city : ''}
+            ${r.vatNumber ? ' &bull; TVA: ' + r.vatNumber : ''}
+            ${r.dirigeantName ? '<br>👤 <strong>' + r.dirigeantName + '</strong>' + (r.dirigeantQualite ? ' <em>(' + r.dirigeantQualite + ')</em>' : '') : ''}
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function selectFranceCompany(company, index) {
+      selectedFranceCompany = company;
+
+      // Highlight selected
+      document.querySelectorAll('.france-result-item').forEach(el => el.classList.remove('selected'));
+      if (index !== undefined) {
+        const el = document.getElementById('france-result-' + index);
+        if (el) el.classList.add('selected');
+      }
+
+      // Fill form fields
+      if (company.companyName) document.getElementById('cc-company-name').value = company.companyName;
+      if (company.address.street) document.getElementById('cc-address').value = company.address.street;
+      if (company.address.city) document.getElementById('cc-city').value = company.address.city;
+      if (company.address.postalCode) document.getElementById('cc-postal').value = company.address.postalCode;
+      if (company.vatNumber) document.getElementById('cc-vat').value = company.vatNumber;
+      if (company.siret) document.getElementById('cc-siret').value = company.siret;
+
+      // Auto-fill First Name and Last Name with Dirigeant names resolved from API
+      const firstNameInput = document.getElementById('cc-first-name');
+      const lastNameInput = document.getElementById('cc-last-name');
+      
+      if (company.dirigeantFirstName || company.dirigeantLastName) {
+        firstNameInput.value = company.dirigeantFirstName || '';
+        lastNameInput.value = company.dirigeantLastName || '';
+      } else {
+        firstNameInput.value = '';
+        lastNameInput.value = '';
+      }
+
+      // Show chips
+      const chips = [];
+      if (company.siret) chips.push(`<div class="chip">🪪 SIRET: <strong>${company.siret}</strong></div>`);
+      if (company.siren) chips.push(`<div class="chip">🔢 SIREN: <strong>${company.siren}</strong></div>`);
+      if (company.vatNumber) chips.push(`<div class="chip">💶 TVA: <strong>${company.vatNumber}</strong></div>`);
+      if (company.address.postalCode) chips.push(`<div class="chip">📮 CP: <strong>${company.address.postalCode}</strong></div>`);
+      if (company.dirigeantName) chips.push(`<div class="chip">👤 Dirigeant: <strong>${company.dirigeantName}</strong>${company.dirigeantQualite ? ' <em style="opacity:0.6;font-size:0.68rem">' + company.dirigeantQualite + '</em>' : ''}</div>`);
+      document.getElementById('auto-filled-chips').innerHTML = chips.join('');
+
+      // Focus first name only if dirigeant not found
+      if (!company.dirigeantName) firstNameInput.focus();
+    }
+
+    async function submitCreateCustomer(e) {
+      e.preventDefault();
+
+      const companyName = document.getElementById('cc-company-name').value.trim();
+      const firstName = document.getElementById('cc-first-name').value.trim();
+      const lastName = document.getElementById('cc-last-name').value.trim();
+      const email = document.getElementById('cc-email').value.trim();
+      const phone = document.getElementById('cc-phone').value.trim();
+      const vatNumber = document.getElementById('cc-vat').value.trim();
+      const address = document.getElementById('cc-address').value.trim();
+      const city = document.getElementById('cc-city').value.trim();
+      const postalCode = document.getElementById('cc-postal').value.trim();
+      const siret = document.getElementById('cc-siret').value.trim();
+      const siren = selectedFranceCompany ? selectedFranceCompany.siren : '';
+
+      if (!companyName || !firstName) {
+        showCustomAlert('Error', 'Company Name and First Name are required.', 'error');
+        return;
+      }
+
+      // Combine First Name and Last Name as contactName to send to backend
+      const contactName = [firstName, lastName].filter(Boolean).join(' ');
+
+      const submitBtn = document.getElementById('submit-create-customer-btn');
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spin">⏳</span> Creating...';
+
+      try {
+        const payload = {
+          companyName,
+          contactName,
+          email: email || undefined,
+          phone: phone || undefined,
+          vatNumber: vatNumber || undefined,
+          siret: siret || undefined,
+          siren: siren || undefined,
+          billingAddress: (address || city || postalCode) ? {
+            address: address || '',
+            city: city || '',
+            zip: postalCode || '',
+            country: 'France',
+            countryCode: 'FR'
+          } : undefined
+        };
+
+        const res = await fetch(`${API_BASE}/api/zoho/create-customer`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          // Reload customer list
+          const custRes = await fetch(`${API_BASE}/api/mocks/customers`);
+          allInventoryCustomers = await custRes.json();
+          renderInventoryCustomers(allInventoryCustomers);
+
+          closeCreateCustomerModal();
+          showCustomAlert('Success', `Customer "${data.contact.companyName}" created successfully in Zoho!<br><span style="font-size: 0.8rem; opacity: 0.8;">Contact ID: ${data.contact.contactId}</span>`, 'success');
+        } else {
+          showCustomAlert('Error', 'Failed to create customer: ' + (data.error || 'Unknown error'), 'error');
+        }
+      } catch (err) {
+        showCustomAlert('Error', 'Network error: ' + err.message, 'error');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '✅ Create in Zoho';
+      }
+    }
+
+    // ============================================================
+    // MULTI-ACCOUNT ZOHO LOGIC
+    // ============================================================
+    async function loadZohoAccounts() {
+      try {
+        const res = await fetch(`${API_BASE}/api/zoho-accounts`);
+        const accounts = await res.json();
+        renderZohoAccounts(accounts);
+      } catch (err) {
+        console.error('Error loading Zoho accounts:', err);
+      }
+    }
+
+    function renderZohoAccounts(accounts) {
+      // 1. Render dropdown select options in the header
+      const select = document.getElementById('header-active-account-select');
+      if (select) {
+        const activeAcc = accounts.find(a => a.isActive);
+        select.innerHTML = `
+          <option value="none" ${!activeAcc ? 'selected' : ''}>🔌 Disconnected</option>
+          ${accounts.map(acc => `
+            <option value="${acc.id}" ${acc.isActive ? 'selected' : ''}>
+              ${acc.name} (${acc.orgId})
+            </option>
+          `).join('')}
+        `;
+      }
+
+      // 2. Render table body in the Manage modal
+      const tableBody = document.getElementById('zoho-accounts-table-body');
+      if (!tableBody) return;
+
+      if (accounts.length === 0) {
+        tableBody.innerHTML = `
+          <tr>
+            <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 1.5rem 0;">
+              No accounts connected. Please click "Connect New Account".
+            </td>
+          </tr>
+        `;
+        return;
+      }
+
+      tableBody.innerHTML = accounts.map(acc => {
+        const statusBadge = acc.isActive
+          ? '<span class="active-indicator">🟢 Active</span>'
+          : `<button class="btn btn-secondary btn-xs" onclick="activateAccount('${acc.id}')">Set Active</button>`;
+
+        return `
+          <tr>
+            <td><strong>${acc.name}</strong></td>
+            <td><code>${acc.orgId}</code></td>
+            <td><span class="badge info">${acc.region.toUpperCase()}</span></td>
+            <td>${statusBadge}</td>
+            <td>
+              <button class="btn btn-danger btn-xs" onclick="deleteAccount('${acc.id}')">✕ Delete</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    async function handleHeaderAccountChange(val) {
+      try {
+        const res = await fetch(`${API_BASE}/api/zoho-accounts/activate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: val === 'none' ? 'none' : val })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          const newName = data.account ? data.account.name : 'None';
+          showCustomAlert('Success', newName === 'None' ? 'Disconnected Zoho integration.' : `Switched active Zoho account to "${newName}"`, 'success');
+          await loadZohoAccounts();
+          await loadConfig();
+          await loadZohoMocks();
+          await loadOrderLogs();
+        } else {
+          showCustomAlert('Error', 'Failed to switch account: ' + (data.error || 'Unknown error'), 'error');
+        }
+      } catch (err) {
+        showCustomAlert('Error', 'Network error: ' + err.message, 'error');
+      }
+    }
+
+    function openAddAccountModal() {
+      document.getElementById('za-name').value = '';
+      document.getElementById('za-region').value = 'in';
+      document.getElementById('za-org-id').value = '';
+      document.getElementById('za-client-id').value = '';
+      document.getElementById('za-client-secret').value = '';
+      document.getElementById('za-refresh-token').value = '';
+      document.getElementById('add-account-modal').classList.add('open');
+    }
+
+    function closeAddAccountModal() {
+      document.getElementById('add-account-modal').classList.remove('open');
+    }
+
+    async function submitAddAccount(e) {
+      e.preventDefault();
+      const submitBtn = document.getElementById('submit-add-account-btn');
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<span class="spin">⏳</span> Connecting...';
+
+      const payload = {
+        name: document.getElementById('za-name').value.trim(),
+        region: document.getElementById('za-region').value,
+        orgId: document.getElementById('za-org-id').value.trim(),
+        clientId: document.getElementById('za-client-id').value.trim(),
+        clientSecret: document.getElementById('za-client-secret').value.trim(),
+        refreshToken: document.getElementById('za-refresh-token').value.trim()
+      };
+
+      try {
+        const res = await fetch(`${API_BASE}/api/zoho-accounts`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+
+        if (res.ok && data.success) {
+          closeAddAccountModal();
+          showCustomAlert('Success', `Connected account "${data.account.name}" successfully!`, 'success');
+          await loadZohoAccounts();
+          await loadConfig();
+          await loadZohoMocks();
+        } else {
+          showCustomAlert('Error', 'Failed to connect: ' + (data.error || 'Unknown error'), 'error');
+        }
+      } catch (err) {
+        showCustomAlert('Error', 'Network error: ' + err.message, 'error');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '🔌 Connect Account';
+      }
+    }
+
+    async function activateAccount(id) {
+      try {
+        const res = await fetch(`${API_BASE}/api/zoho-accounts/activate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+          showCustomAlert('Success', `Switched active Zoho account to "${data.account.name}"`, 'success');
+          await loadZohoAccounts();
+          await loadConfig();
+          await loadZohoMocks();
+        } else {
+          showCustomAlert('Error', 'Failed to switch account: ' + (data.error || 'Unknown error'), 'error');
+        }
+      } catch (err) {
+        showCustomAlert('Error', 'Network error: ' + err.message, 'error');
+      }
+    }
+
+    async function deleteAccount(id) {
+      showCustomConfirm(
+        'Delete Connection',
+        'Are you sure you want to delete this Zoho account connection?',
+        async () => {
+          try {
+            const res = await fetch(`${API_BASE}/api/zoho-accounts/${id}`, {
+              method: 'DELETE'
+            });
+            const data = await res.json();
+            if (res.ok && data.success) {
+              showCustomAlert('Success', 'Account connection deleted.', 'success');
+              await loadZohoAccounts();
+              await loadConfig();
+              await loadZohoMocks();
+            } else {
+              showCustomAlert('Error', 'Failed to delete account: ' + (data.error || 'Unknown error'), 'error');
+            }
+          } catch (err) {
+            showCustomAlert('Error', 'Network error: ' + err.message, 'error');
+          }
+        }
+      );
+    }
+
+    function switchMobileTab(tabId) {
+      // Update active tab button classes
+      const btns = document.querySelectorAll('.mobile-tabs .tab-btn');
+      btns.forEach(btn => btn.classList.remove('active'));
+      
+      if (tabId === 'simulator') btns[0].classList.add('active');
+      if (tabId === 'inventory') btns[1].classList.add('active');
+      if (tabId === 'chat') btns[2].classList.add('active');
+
+      // Toggle tab panel visibility
+      const panels = ['simulator', 'inventory', 'chat'];
+      panels.forEach(p => {
+        const el = document.getElementById(`panel-${p}`);
+        if (el) {
+          if (p === tabId) {
+            el.classList.add('active-tab-panel');
+          } else {
+            el.classList.remove('active-tab-panel');
+          }
+        }
+      });
+      
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
   </script>
 </body>
 </html>
