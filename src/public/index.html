@@ -810,15 +810,73 @@
     let audioChunks = [];
     let isRecording = false;
     let recordStream = null;
+    let speechRecognition = null;
+    let liveInterimText = '';
+    let liveFinalText = '';
 
     const liveRecordBtn = document.getElementById('live-record-btn');
+    const simText = document.getElementById('sim-text');
+
+    // Initialize Web Speech API for real-time interim display
+    const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    function startSpeechRecognition() {
+      if (!SpeechRecognitionAPI) return;
+
+      speechRecognition = new SpeechRecognitionAPI();
+      speechRecognition.lang = 'ta-IN'; // Tamil India — best for Tanglish
+      speechRecognition.continuous = true;
+      speechRecognition.interimResults = true;
+      speechRecognition.maxAlternatives = 1;
+
+      liveFinalText = '';
+      liveInterimText = '';
+
+      speechRecognition.onresult = (event) => {
+        liveInterimText = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          if (event.results[i].isFinal) {
+            liveFinalText += event.results[i][0].transcript + ' ';
+          } else {
+            liveInterimText = event.results[i][0].transcript;
+          }
+        }
+        // Show confirmed text + greyed interim text in textarea
+        simText.value = liveFinalText + liveInterimText;
+        simText.style.opacity = liveInterimText ? '0.75' : '1';
+      };
+
+      speechRecognition.onerror = (err) => {
+        // Ignore 'no-speech' errors silently; log others
+        if (err.error !== 'no-speech') {
+          console.warn('[SpeechRecognition] Error:', err.error);
+        }
+      };
+
+      speechRecognition.onend = () => {
+        // Auto-restart if still recording (browser stops after silence)
+        if (isRecording && speechRecognition) {
+          try { speechRecognition.start(); } catch(e) { /* already started */ }
+        }
+      };
+
+      try { speechRecognition.start(); } catch(e) { console.warn('SpeechRecognition start failed:', e); }
+    }
+
+    function stopSpeechRecognition() {
+      if (speechRecognition) {
+        speechRecognition.onend = null; // Prevent auto-restart
+        try { speechRecognition.stop(); } catch(e) {}
+        speechRecognition = null;
+      }
+    }
 
     liveRecordBtn.addEventListener('click', async () => {
       if (!isRecording) {
         try {
           recordStream = await navigator.mediaDevices.getUserMedia({ audio: true });
           audioChunks = [];
-          
+
           let options = {};
           if (typeof MediaRecorder !== 'undefined') {
             if (MediaRecorder.isTypeSupported('audio/webm')) {
@@ -829,9 +887,9 @@
               options = { mimeType: 'audio/mp4' };
             }
           }
-          
+
           mediaRecorder = new MediaRecorder(recordStream, options);
-          
+
           mediaRecorder.ondataavailable = (event) => {
             if (event.data.size > 0) {
               audioChunks.push(event.data);
@@ -840,32 +898,34 @@
 
           mediaRecorder.onstop = async () => {
             const audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
-            
-            // Show transcription status
+
+            // Show transcribing status (keep interim text visible during upload)
             liveRecordBtn.innerHTML = '<span class="pulse-dot" style="width:8px; height:8px; background-color:#ff9800; box-shadow:0 0 5px #ff9800;"></span> Transcribing...';
             liveRecordBtn.disabled = true;
-            
+            simText.style.opacity = '0.6';
+
             try {
               const formData = new FormData();
               let extension = 'webm';
               if (mediaRecorder.mimeType && mediaRecorder.mimeType.includes('ogg')) extension = 'ogg';
               else if (mediaRecorder.mimeType && mediaRecorder.mimeType.includes('mp4')) extension = 'mp4';
               else if (mediaRecorder.mimeType && mediaRecorder.mimeType.includes('wav')) extension = 'wav';
-              
+
               formData.append('audio', audioBlob, `recording.${extension}`);
-              
+
               const res = await fetch(`${API_BASE}/api/transcribe-tanglish`, {
                 method: 'POST',
                 body: formData
               });
-              
+
               const data = await res.json();
               if (res.ok && data.tanglish) {
-                const simText = document.getElementById('sim-text');
+                // Replace interim text with accurate Whisper + Tanglish result
                 simText.value = data.tanglish;
+                simText.style.opacity = '1';
                 simText.focus();
-                
-                // Highlight textarea visually
+
+                // Green success flash
                 simText.style.borderColor = 'var(--success)';
                 simText.style.boxShadow = '0 0 10px rgba(18, 183, 106, 0.4)';
                 setTimeout(() => {
@@ -873,10 +933,15 @@
                   simText.style.boxShadow = '';
                 }, 2500);
               } else {
-                alert('Transcription failed: ' + (data.error || 'Unknown error'));
+                // Whisper failed — keep the live interim text as fallback
+                simText.style.opacity = '1';
+                simText.style.borderColor = 'var(--warning, #ff9800)';
+                setTimeout(() => { simText.style.borderColor = ''; }, 2000);
+                console.warn('Whisper transcription failed, keeping interim text. Error:', data.error);
               }
             } catch (err) {
               console.error(err);
+              simText.style.opacity = '1';
               alert('Error uploading or transcribing audio: ' + err.message);
             } finally {
               liveRecordBtn.disabled = false;
@@ -889,15 +954,22 @@
             }
           };
 
+          // Start both MediaRecorder (for Whisper) and SpeechRecognition (for real-time display)
           mediaRecorder.start();
+          startSpeechRecognition();
+
           isRecording = true;
+          simText.value = '';
           liveRecordBtn.className = 'btn btn-accent recording';
           liveRecordBtn.innerHTML = '<span class="mic-icon">🛑</span> Stop Recording';
+
         } catch (err) {
           console.error('Microphone access denied or error:', err);
           alert('Could not access microphone. Please check permissions.');
         }
       } else {
+        // Stop recording
+        stopSpeechRecognition();
         if (mediaRecorder && mediaRecorder.state !== 'inactive') {
           mediaRecorder.stop();
         }
