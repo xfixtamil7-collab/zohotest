@@ -236,6 +236,56 @@ async function runTestFlow() {
     }
 
     console.log('\n🎉 ALL CORE PIPELINE TESTS COMPLETED SUCCESSFULLY! 🎉');
+
+    // === BONUS: Tamil Script Test Cases ===
+    console.log('\n\n🌟 [BONUS] Running Tamil Script Test Cases...');
+    await SessionService.clearSession(testPhone);
+
+    // Tamil Step A: Pure Tamil order creation
+    console.log('\n🇮🇳 [Tamil-A] Simulating Tamil voice: "முருகன் ஸ்டோர்ஸ் க்கு 10 சிமெண்ட், 5 ஸ்டீல் ராடு போடுங்க"');
+    const tamilMsgA = `test_msg_${Date.now() + 10}`;
+    await QueueService.processMessage({
+      from: testPhone,
+      messageId: tamilMsgA,
+      timestamp: Math.floor(Date.now() / 1000),
+      type: 'text',
+      text: 'முருகன் ஸ்டோர்ஸ் க்கு 10 சிமெண்ட், 5 ஸ்டீல் ராடு போடுங்க'
+    });
+
+    session = await SessionService.getSession(testPhone);
+    console.log(`[Tamil-A] Session state: ${session.state}`);
+    console.log(`[Tamil-A] Draft Customer: ${session.draft?.spokenCustomerName || '(none)'}`);
+    console.log(`[Tamil-A] Draft Items: ${session.draft?.items?.length || 0}`);
+
+    // Tamil Step B: Tamil correction
+    console.log('\n🇮🇳 [Tamil-B] Simulating Tamil correction: "ஸ்டீல் ராடு அளவு எட்ட மாத்துங்க"');
+    const tamilMsgB = `test_msg_${Date.now() + 11}`;
+    await QueueService.processMessage({
+      from: testPhone,
+      messageId: tamilMsgB,
+      timestamp: Math.floor(Date.now() / 1000),
+      type: 'text',
+      text: 'ஸ்டீல் ராடு அளவு எட்ட மாத்துங்க'
+    });
+
+    session = await SessionService.getSession(testPhone);
+    console.log(`[Tamil-B] Session state: ${session.state}`);
+
+    // Tamil Step C: Tamil confirm
+    console.log('\n🇮🇳 [Tamil-C] Simulating Tamil confirm: "சரி"');
+    const tamilMsgC = `test_msg_${Date.now() + 12}`;
+    await QueueService.processMessage({
+      from: testPhone,
+      messageId: tamilMsgC,
+      timestamp: Math.floor(Date.now() / 1000),
+      type: 'text',
+      text: 'சரி'
+    });
+
+    session = await SessionService.getSession(testPhone);
+    console.log(`[Tamil-C] Session state after "சரி": ${session.state}`);
+    console.log('\n🎉 TAMIL SCRIPT TEST CASES COMPLETED!');
+
   } catch (error) {
     console.error('\n❌ Integration Test Failed:', error);
     process.exit(1);

@@ -33,9 +33,13 @@ export class OpenAIService {
 
     try {
       const openai = this.getClient();
+      // Note: No language lock - Whisper auto-detects Tamil/Tanglish/English.
+      // The prompt below guides Whisper with key Tanglish vocabulary so it outputs
+      // words like 'podunga', 'maathunga', 'vendam' correctly in Latin script.
       const transcription = await openai.audio.transcriptions.create({
         file: fs.createReadStream(filePath),
         model: 'whisper-1',
+        prompt: 'Murugan Stores ku 10 cement, 5 steel rod podunga. Maathunga. Vendam. Seri. Ok. Bill podunga. Invoice podunga. SO-12345 edit pannunga. INV-12345 maathunga. Quantity 10. Rate 500. Cement, steel rod, brick, sand, rice bag. Correct ah varanum. Polaam. Confirm pannunga. Cancel pannunga. Customer name, company name, order, total amount.',
       });
       return transcription.text;
     } catch (error) {
@@ -106,20 +110,21 @@ Input name: "${rawName}"`;
     
     // Explicit Button and Keyword Action resolution
     let action: 'CREATE' | 'CONFIRM' | 'CANCEL' | 'INVOICE' | 'EDIT' | 'NONE' = 'CREATE';
-    if (cleanText === 'btn_confirm' || cleanText.match(/\b(ok|confirm|approve|yes|seri)\b/)) {
+    if (cleanText === 'btn_confirm' || cleanText.match(/\b(ok|confirm|approve|yes|seri|polaam)\b/) || cleanText.includes('சரி') || cleanText.includes('ஓகே') || cleanText.includes('போலாம்')) {
       action = 'CONFIRM';
-    } else if (cleanText === 'btn_cancel' || cleanText.match(/\b(cancel|vendam|discard)\b/)) {
+    } else if (cleanText === 'btn_cancel' || cleanText.match(/\b(cancel|vendam|discard)\b/) || cleanText.includes('வேண்டாம்')) {
       action = 'CANCEL';
-    } else if (cleanText === 'btn_invoice_create' || cleanText.match(/\b(invoice|bill)\b/)) {
+    } else if (cleanText === 'btn_invoice_create' || cleanText.match(/\b(invoice|bill)\b/) || cleanText.includes('பில்')) {
       // Check if they are trying to edit an invoice instead of generating one
-      const isInvoiceEdit = cleanText.match(/\b(edit|update|change|maathu|maathunga)\b/) && cleanText.match(/\binv-?\d+\b/);
+      const isInvoiceEdit = (cleanText.match(/\b(edit|update|change|maathu|maathunga)\b/) || cleanText.includes('மாத்து') || cleanText.includes('மாத்துங்க')) && cleanText.match(/\binv-?\d+\b/);
       if (!isInvoiceEdit) {
         action = 'INVOICE';
       }
     }
 
-    const isSalesOrderEdit = cleanText.match(/\b(edit|update|change|maathu|maathunga)\b/) && cleanText.match(/\bso-?\d+\b/);
-    const isInvoiceEdit = cleanText.match(/\b(edit|update|change|maathu|maathunga)\b/) && cleanText.match(/\binv-?\d+\b/);
+    const hasTamilEditKeyword = cleanText.includes('மாத்துங்க') || cleanText.includes('மாத்து') || cleanText.match(/\b(edit|update|change|maathu|maathunga)\b/);
+    const isSalesOrderEdit = hasTamilEditKeyword && cleanText.match(/\bso-?\d+\b/);
+    const isInvoiceEdit = hasTamilEditKeyword && cleanText.match(/\binv-?\d+\b/);
     if (isSalesOrderEdit || isInvoiceEdit) {
       action = 'EDIT';
     }
@@ -260,16 +265,16 @@ Input name: "${rawName}"`;
       const systemPrompt = `You are a Senior Order Parser AI. Your job is to extract business details from WhatsApp voice note transcriptions, handling complex pricing and quantity inference scenarios.
 
 The language used can be English, Tamil, or Tanglish (Tamil transliterated in English alphabet).
-Common Tanglish phrases and their meanings:
-- "podunga" / "podu" = place/put/add
-- "maathunga" / "maathu" = change/update
-- "vendam" = don't want / cancel
-- "seri" / "ok" = confirmed / okay
-- "sriya varanum" / "correct ah varanum" / "correct ahh vara maadhiri" = should come correctly (user instruction, NOT an order item)
-- "qty your choice" / "quantity-a your choice set pannunga" = let the system infer quantity
-- "polaam" = let's go / confirm
-- "vara maadhiri" = should come like / should be
-- "irukkanum" = must be / should be
+Common Tamil/Tanglish phrases and their meanings:
+- "podunga" / "podu" / "போடுங்க" / "போடு" = place/put/add
+- "maathunga" / "maathu" / "மாத்துங்க" / "மாத்து" = change/update
+- "vendam" / "வேண்டாம்" = don't want / cancel
+- "seri" / "ok" / "சரி" / "ஓகே" = confirmed / okay
+- "sriya varanum" / "correct ah varanum" / "சரியா வரணும்" / "கரெக்டா வரணும்" / "சரியா வர மாதிரி" / "correct ahh vara maadhiri" = should come correctly (user instruction, NOT an order item)
+- "qty your choice" / "quantity-a your choice set pannunga" / "அளவு உங்க இஷ்டம்" = let the system infer quantity
+- "polaam" / "போலாம்" = let's go / confirm
+- "vara maadhiri" / "வர மாதிரி" = should come like / should be
+- "irukkanum" / "இருக்கணும்" = must be / should be
 
 ANALYSIS RULES:
 1. **Customer Name**: Extract spoken customer name, or empty string if none found.
@@ -280,10 +285,10 @@ ANALYSIS RULES:
 6. **Product Size/Weight**: Include size in the name (e.g. "Veera Ponni Rice 20Kg") and set unit accordingly (e.g. "20Kg Bags").
 7. **Meta-Instructions**: Phrases like "sriya varanum", "correct ah varanum", "vara maadhiri irukkanum" are user instructions, NOT items. Ignore them for item extraction.
 8. **Action Detection**:
-   - 'CONFIRM': "OK", "Confirm", "seri", "polaam"
-   - 'CANCEL': "Cancel", "vendam", "stop"
-   - 'INVOICE': "Invoice", "Bill", "Bill podunga" (Only when generating an invoice from a Sales Order)
-   - 'EDIT': When the user explicitly requests to edit, update, or change an *already existing* Sales Order (e.g. referencing "SO-00001") or Invoice (e.g. referencing "INV-00001").
+   - 'CONFIRM': "OK", "Confirm", "seri", "polaam", "சரி", "ஓகே", "போலாம்", "உறுதி செய்"
+   - 'CANCEL': "Cancel", "vendam", "stop", "வேண்டாம்", "நிறுத்து"
+   - 'INVOICE': "Invoice", "Bill", "Bill podunga", "பில்", "பில் போடுங்க" (Only when generating an invoice from a Sales Order)
+   - 'EDIT': When the user explicitly requests to edit, update, or change an *already existing* Sales Order (e.g. referencing "SO-00001") or Invoice (e.g. referencing "INV-00001") using keywords like "edit", "update", "maathu", "மாத்து", "மாத்துங்க".
    - 'CREATE': default for new order details
 9. **PRECISION RULE**: For inferred quantities, always compute quantity = Math.round(targetTotal / rate) where rate is the best rate within [priceRangeMin, priceRangeMax] that yields the cleanest round quantity. VERIFY: quantity × rate must equal targetTotal (or be within €0.01).
 
@@ -411,6 +416,13 @@ If the correction tells to change the quantity, rate, price range, or add/remove
 If the correction mentions a new target total with "qty your choice", recalculate quantity = Math.round(targetTotal / rate).
 Preserve the currency symbol and currencyCode from the original draft unless explicitly changed.
 
+Common Tamil/Tanglish correction phrases and their meanings:
+- "maathunga" / "maathu" / "மாத்துங்க" / "மாத்து" = change/update/modify (e.g. "quantity 8 a maathunga" / "அளவை எட்டா மாத்துங்க" -> change quantity of the item to 8)
+- "podunga" / "podu" / "போடுங்க" / "போடு" = place/put/add/insert
+- "vendam" / "வேண்டாம்" = don't want / remove/delete
+- "seri" / "ok" / "சரி" / "ஓகே" = confirmed / okay
+- "so-12345 a edit pannunga" / "so-12345 a update pannunga" / "so-12345 a மாத்துங்க" = edit/update sales order SO-12345
+
 Return ONLY a strict JSON object matching this schema:
 {
   "spokenCustomerName": "customer name",
@@ -505,11 +517,22 @@ Rules:
 2. Transliterate all Tamil words phonetically using English letters (Latin script).
 3. Do NOT translate Tamil words to English words (e.g. keep "poadunga" or "podunga" for "போடுங்க", don't write "put/place").
 4. Keep standard English technical terms/nouns in English (e.g., "cement", "steel rod", "invoice", "quantity", customer names like "Murugan Stores").
-5. Output ONLY the resulting Tanglish string, without any introduction, explanations, quotation marks, or notes.
+5. Keep numbers as-is (e.g., "10", "5", "8").
+6. Output ONLY the resulting Tanglish string, without any introduction, explanations, quotation marks, or notes.
 
-Example 1: "முருகன் ஸ்டோர்ஸ் க்கு 10 சிமெண்ட், 5 ஸ்டீல் ராடு போடுங்க" -> "Murugan Stores ku 10 cement, 5 steel rod podunga"
-Example 2: "ஸ்டீல் ராடு அளவு எட்ட மாத்துங்க" -> "Steel rod quantity 8 a maathunga"
-Example 3: "பில் போடுங்க" -> "Bill podunga"`;
+Examples:
+- "முருகன் ஸ்டோர்ஸ் க்கு 10 சிமெண்ட், 5 ஸ்டீல் ராடு போடுங்க" -> "Murugan Stores ku 10 cement, 5 steel rod podunga"
+- "ஸ்டீல் ராடு அளவு எட்ட மாத்துங்க" -> "Steel rod quantity 8 a maathunga"
+- "பில் போடுங்க" -> "Bill podunga"
+- "சரி" -> "seri"
+- "ஓகே" -> "ok"
+- "வேண்டாம்" -> "vendam"
+- "போலாம்" -> "polaam"
+- "சிமெண்ட் அளவு 20 ஆ மாத்துங்க" -> "cement quantity 20 a maathunga"
+- "SO-12345 a maathunga" -> "SO-12345 a maathunga"
+- "INV-12345 a edit pannunga" -> "INV-12345 a edit pannunga"
+- "கரெக்டா வரணும்" -> "correct ah varanum"
+- "அளவு உங்க இஷ்டம் set pannunga" -> "quantity-a your choice set pannunga"`;
 
       const response = await openai.chat.completions.create({
         model: 'gpt-4o',
