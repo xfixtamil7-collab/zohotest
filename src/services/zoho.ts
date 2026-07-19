@@ -16,6 +16,13 @@ export interface ZohoCredentials {
 export class ZohoService {
   private static tokenCache = new Map<string, { accessToken: string; tokenExpiry: number }>();
   private static orgCurrencyCache = new Map<string, { symbol: string; code: string }>();
+  private static customFieldsCache = new Map<
+    string,
+    {
+      siret?: { id: string; apiName: string };
+      vatNumber?: { id: string; apiName: string };
+    }
+  >();
 
   // Predefined mock data for local testing
   private static mockCustomers: ZohoContact[] = [
@@ -123,6 +130,62 @@ export class ZohoService {
       return { symbol: '€', code: 'EUR' };
     }
     return { symbol: '₹', code: 'INR' };
+  }
+
+  /**
+   * Fetches contact custom fields definitions and returns the customfield_id mappings.
+   */
+  private static async getContactCustomFieldIds(credentials: ZohoCredentials): Promise<{
+    siret?: { id: string; apiName: string };
+    vatNumber?: { id: string; apiName: string };
+  }> {
+    const cached = this.customFieldsCache.get(credentials.id);
+    if (cached) {
+      return cached;
+    }
+
+    try {
+      const token = await this.getAccessToken(credentials);
+      const domain = this.getInventoryDomain(credentials.region);
+      
+      console.log(`[ZohoService] Fetching contact fields schema for "${credentials.name}"...`);
+      const response = await axios.get(`${domain}/settings/fields`, {
+        params: { entity: 'contact' },
+        headers: {
+          Authorization: `Zoho-oauthtoken ${token}`,
+          'X-com-zoho-inventory-organizationid': credentials.orgId
+        }
+      });
+
+      const fields = response.data?.fields || [];
+      const mapping: {
+        siret?: { id: string; apiName: string };
+        vatNumber?: { id: string; apiName: string };
+      } = {};
+
+      const siretField = fields.find((f: any) => f.api_name === 'cf_siret');
+      if (siretField) {
+        mapping.siret = {
+          id: siretField.field_id || siretField.customfield_id,
+          apiName: siretField.api_name
+        };
+      }
+
+      const vatField = fields.find((f: any) => f.api_name === 'cf_vat_number' || f.api_name === 'cf_num_ro_de_tva');
+      if (vatField) {
+        mapping.vatNumber = {
+          id: vatField.field_id || vatField.customfield_id,
+          apiName: vatField.api_name
+        };
+      }
+
+      console.log(`[ZohoService] Resolved custom field IDs for "${credentials.name}":`, mapping);
+      this.customFieldsCache.set(credentials.id, mapping);
+      return mapping;
+    } catch (error: any) {
+      console.error(`[ZohoService] Failed to fetch contact fields schema for "${credentials.name}":`, error.response?.data || error.message);
+      return {};
+    }
   }
 
   /**
@@ -522,19 +585,21 @@ export class ZohoService {
         payload.shipping_address = payload.billing_address;
       }
 
-      // Add Custom Fields (Siret and VAT Number)
+      // Add Custom Fields dynamically based on active organization's schema
       const customFields: any[] = [];
-      if (params.siret) {
+      const fieldMapping = await this.getContactCustomFieldIds(credentials);
+
+      if (params.siret && fieldMapping.siret) {
         customFields.push({
-          customfield_id: '38808000000093582',
-          api_name: 'cf_siret',
+          customfield_id: fieldMapping.siret.id,
+          api_name: fieldMapping.siret.apiName,
           value: params.siret
         });
       }
-      if (params.vatNumber) {
+      if (params.vatNumber && fieldMapping.vatNumber) {
         customFields.push({
-          customfield_id: '38808000000093598',
-          api_name: 'cf_vat_number',
+          customfield_id: fieldMapping.vatNumber.id,
+          api_name: fieldMapping.vatNumber.apiName,
           value: params.vatNumber
         });
       }
